@@ -8,11 +8,8 @@ import GeneratePage from "../../../pages/GeneratePage/GeneratePage";
 import { Header } from "../../../widgets/Header";
 import { Box, useMediaQuery, useTheme } from "@mui/material";
 import { Footer } from "../../../widgets/Footer/ui/Footer";
-import { AuthPage, SettingsPage } from "../../../pages";
-import VerificationPage from "../../../pages/VerificationPage/VerificationPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import MyPresentationsPage from "../../../pages/MyPresentationsPage/MyPresentationsPage";
-import OAuthSuccess from "../../../shared/components/OAuthSuccess";
 
 const PageWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <motion.div
@@ -29,8 +26,7 @@ const PageWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 const AnimatedRoutes = () => {
   const location = useLocation();
   const isMobile = useMediaQuery(useTheme().breakpoints.down("md"));
-  const hideFooter =
-    location.pathname === "/projects" || location.pathname === "/settings";
+  const hideFooter = location.pathname === "/projects";
 
   return (
     <>
@@ -39,11 +35,9 @@ const AnimatedRoutes = () => {
           <Route
             path="/"
             element={
-              <ProtectedRoute>
-                <PageWrapper>
-                  <PromptPage />
-                </PageWrapper>
-              </ProtectedRoute>
+              <PageWrapper>
+                <PromptPage />
+              </PageWrapper>
             }
           />
           <Route
@@ -76,35 +70,6 @@ const AnimatedRoutes = () => {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <PageWrapper>
-                  <SettingsPage />
-                </PageWrapper>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/auth"
-            element={
-              <PageWrapper>
-                <AuthPage />
-              </PageWrapper>
-            }
-          />
-          <Route
-            path="/verify-email"
-            element={
-              <PageWrapper>
-                <VerificationPage />
-              </PageWrapper>
-            }
-          />
-
-          {/* Отдельный роут для успешного aouth */}
-          <Route path="/auth/success" element={<OAuthSuccess />} />
         </Routes>
         {!hideFooter && (
           <Box sx={{ height: isMobile ? 64 : 120, flexShrink: 0 }}>

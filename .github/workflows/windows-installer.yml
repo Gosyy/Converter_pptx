@@ -1,0 +1,25 @@
+name: windows-installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "work", "main" ]
+
+jobs:
+  build-msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install WiX Toolset
+        run: choco install wixtoolset --no-progress -y
+
+      - name: Build MSI
+        shell: pwsh
+        run: ./scripts/build_windows_msi.ps1
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Converter_pptx-msi
+          path: dist/Converter_pptx.msi

@@ -1,1 +1,2 @@
-export * from "./components/GithubButton";
+// GitHub footer block removed in cleanup.
+export {};
