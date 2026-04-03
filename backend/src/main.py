@@ -2,7 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-from src.routes import file_routes, presentation_routes, test_routes, auth_routes
+from src.routes import (
+    file_routes,
+    presentation_routes,
+    test_routes,
+    auth_routes,
+    kandinsky_routes,
+)
 from src.preload import preload_models
 from src.config import settings
 
@@ -14,10 +20,8 @@ app = FastAPI(
     docs_url="/docs",
 )
 
-# Настройка CORS
-origins = [
-    "*",
-]
+# Настройка CORS (без wildcard в production)
+origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,3 +60,4 @@ app.include_router(presentation_routes.router)
 app.include_router(file_routes.router)
 app.include_router(test_routes.router)
 app.include_router(auth_routes.router)
+app.include_router(kandinsky_routes.router)

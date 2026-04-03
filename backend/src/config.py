@@ -14,6 +14,11 @@ class _Settings(BaseSettings):
     GIGACHAT_SCOPE: str = "GIGACHAT_API_PERS"
     GIGACHAT_VERIFY_SSL: bool = True
 
+    # External secret manager (optional)
+    SECRET_MANAGER_URL: str = ""
+    SECRET_MANAGER_TOKEN: str = ""
+    SECRET_MANAGER_TIMEOUT: int = 5
+
     # Основные модели
     DEFAULT_MODEL: str = "GigaChat-2-Pro"
     DEFAULT_EMBEDDING_MODEL: str = "openai/gpt-oss-120b"
@@ -37,6 +42,7 @@ class _Settings(BaseSettings):
     # Домены и фронт
     DOMAIN: str = "http://localhost:3000"
     FRONT_URL: str = "http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:3000"
 
     # PostgreSQL
     USE_DATABASE: bool = False
@@ -45,6 +51,23 @@ class _Settings(BaseSettings):
     POSTGRES_DB: str | None = None
     POSTGRES_HOST: str | None = None
     POSTGRES_PORT: int = 5432
+
+    # Feature flags
+    FEATURE_RUST_SIDECAR: bool = False
+    FEATURE_KANDINSKY: bool = False
+    FEATURE_PROGRESS_WS: bool = True
+    FEATURE_DB_TOGGLE_ADMIN: bool = True
+
+    # Rust sidecar
+    RUST_SIDECAR_URL: str = "http://rust-sidecar:7001"
+    RUST_SIDECAR_TIMEOUT: int = 30
+
+    # Kandinsky (auto internal/public selection)
+    KANDINSKY_INTERNAL_URL: str | None = None
+    KANDINSKY_INTERNAL_TOKEN: str | None = None
+    KANDINSKY_PUBLIC_URL: str | None = None
+    KANDINSKY_PUBLIC_API_KEY: str | None = None
+    KANDINSKY_TIMEOUT: int = 60
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
@@ -56,8 +79,6 @@ class _ModelSettings(BaseSettings):
 
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
-
-    TOP_K_RETRIEVAL: int = 5
 
     GEN_TEMPERATURE: float = 0.2
 

@@ -35,11 +35,9 @@ const AnimatedRoutes = () => {
           <Route
             path="/"
             element={
-              <ProtectedRoute>
-                <PageWrapper>
-                  <PromptPage />
-                </PageWrapper>
-              </ProtectedRoute>
+              <PageWrapper>
+                <PromptPage />
+              </PageWrapper>
             }
           />
           <Route

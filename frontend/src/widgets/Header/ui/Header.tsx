@@ -8,18 +8,24 @@ import {
   useTheme,
   useMediaQuery,
   Button,
+  Switch,
+  Tooltip,
 } from "@mui/material";
 import { ReactComponent as Logo } from "../../../shared/assets/logo/logo-cut.svg";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import SlideNavigationToolbar from "../../../features/presentation/ui/components/SlideNavigationToolbar";
 import { useHeader } from "../hooks";
+import WbSunnyRoundedIcon from "@mui/icons-material/WbSunnyRounded";
+import DarkModeRoundedIcon from "@mui/icons-material/DarkModeRounded";
+import { ColorModeContext } from "../../../app/ColorModeContext";
 
 const MotionAppBar = motion(AppBar);
 
 export const Header: React.FC = () => {
   const navigate = useNavigate();
   const { controls, location } = useHeader();
+  const { mode, toggleMode } = React.useContext(ColorModeContext);
 
   const theme = useTheme();
 
@@ -75,15 +81,42 @@ export const Header: React.FC = () => {
         </Box>
         {location.pathname === "/editor" && <SlideNavigationToolbar />}
 
-        {location.pathname === "/" && (
-          <Button
-            variant="contained"
-            sx={{ textTransform: "none" }}
-            onClick={() => navigate("/projects")}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Tooltip
+            title={
+              mode === "light" ? "Светлая тема (солнце)" : "Тёмная тема (луна)"
+            }
           >
-            Мои презентации
-          </Button>
-        )}
+            <Box sx={{ display: "flex", alignItems: "center" }}>
+              <WbSunnyRoundedIcon
+                sx={{ mr: 0.5, color: mode === "light" ? "warning.main" : "text.disabled" }}
+              />
+              <Switch
+                checked={mode === "dark"}
+                onChange={toggleMode}
+                color="default"
+                sx={{
+                  "& .MuiSwitch-switchBase": {
+                    transitionDuration: "250ms",
+                  },
+                }}
+              />
+              <DarkModeRoundedIcon
+                sx={{ ml: 0.5, color: mode === "dark" ? "info.main" : "text.disabled" }}
+              />
+            </Box>
+          </Tooltip>
+
+          {location.pathname === "/" && (
+            <Button
+              variant="contained"
+              sx={{ textTransform: "none" }}
+              onClick={() => navigate("/projects")}
+            >
+              Мои презентации
+            </Button>
+          )}
+        </Box>
       </Toolbar>
     </MotionAppBar>
   );
