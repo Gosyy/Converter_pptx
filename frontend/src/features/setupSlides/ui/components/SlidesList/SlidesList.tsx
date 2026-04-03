@@ -110,9 +110,7 @@ export const SlidesList = () => {
             },
           }}
         >
-          <MenuItem value="google/gemma-3-12b-it">gemma-3-12b-it</MenuItem>
-          <MenuItem value="moonshotai/kimi-k2-0905">kimi-k2-0905</MenuItem>
-          <MenuItem value="openai/gpt-oss-120b">gpt-oss-120b</MenuItem>
+          <MenuItem value="GigaChat-2">GigaChat 2.0</MenuItem>
         </Select>
       </Box>
       <AnimatePresence mode="popLayout">
