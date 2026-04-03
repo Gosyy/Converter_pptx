@@ -80,8 +80,6 @@ class _ModelSettings(BaseSettings):
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
 
-    TOP_K_RETRIEVAL: int = 5
-
     GEN_TEMPERATURE: float = 0.2
 
     JSON_ONLY_PROMPT: str = (
