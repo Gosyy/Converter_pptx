@@ -1,126 +1,3 @@
-// import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
-// import { useDispatch, useSelector } from "react-redux";
-// import { AppDispatch, RootState } from "../../../app/store";
-// import { testMarkdown } from "../../constants/testMarkdown";
-// import { markdownToSlides } from "../../utils/markdownToSlides";
-// import { setSlides } from "../../../app/store/slices/editorSlice";
-// import {
-//   setLoading,
-//   setPromptSettings,
-// } from "../../../app/store/slices/promptSlice";
-
-// const API_URL = process.env.REACT_APP_API_URL;
-
-// interface ChatMessage {
-//   id: string;
-//   type: "user" | "ai";
-//   content: string;
-//   file?: File | null;
-// }
-// export const useGeneration = () => {
-//   const [messages, setMessages] = useState<ChatMessage[]>([]);
-//   const [inputText, setInputText] = useState("");
-//   const [error, setError] = useState<string | null>(null);
-//   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-//   const fileInputRef = useRef<HTMLInputElement | null>(null);
-//   const dispatch = useDispatch<AppDispatch>();
-//   const [model, setModel] = useState<string>("GigaChat-2");
-//   const [fileStatus, setFileStatus] = useState<{
-//     name: string;
-//     converted: boolean;
-//   } | null>(null);
-
-//   const { file, text, loading } = useSelector(
-//     (state: RootState) => state.prompt
-//   );
-
-//   useEffect(() => {
-//     const mockMessages: ChatMessage[] = [
-//       {
-//         id: crypto.randomUUID(),
-//         type: "ai",
-//         content: "Привет! Я помогу тебе пересоздать презентацию.",
-//       },
-//     ];
-//     setMessages(mockMessages);
-//   }, []);
-
-//   const sendMessage = (): Promise<boolean> => {
-//     return new Promise((resolve) => {
-//       if ((!inputText.trim() || !selectedFile) && (!file || !text.trim())) {
-//         setError("Введите текст и прикрепите файл!");
-//         resolve(false);
-//         return;
-//       }
-
-//       const userMsg: ChatMessage = {
-//         id: crypto.randomUUID(),
-//         type: "user",
-//         content: inputText,
-//         file: selectedFile || file,
-//       };
-//       setMessages((prev) => [...prev, userMsg]);
-//       dispatch(setPromptSettings({ text: inputText, file: selectedFile }));
-//       setInputText("");
-//       setFileStatus({
-//         name: selectedFile?.name || file?.name || "unknown",
-//         converted: false,
-//       });
-//       dispatch(setLoading(true));
-
-//       setTimeout(() => {
-//         const aiMsg: ChatMessage = {
-//           id: crypto.randomUUID(),
-//           type: "ai",
-//           content: "Конечно! Вот сгенерированная презентация.",
-//         };
-//         setMessages((prev) => [...prev, aiMsg]);
-//         setFileStatus({
-//           name: selectedFile?.name || file?.name || "unknown",
-//           converted: true,
-//         });
-//         setSelectedFile(null);
-//         const parsedSlides = markdownToSlides(testMarkdown);
-//         dispatch(setSlides(parsedSlides));
-//         if (fileInputRef.current) fileInputRef.current.value = "";
-//         resolve(true);
-//         dispatch(setLoading(false));
-//       }, 500);
-//     });
-//   };
-
-//   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-//     const file = e.target.files?.[0];
-//     if (!file) return;
-//     setSelectedFile(file);
-//     setFileStatus({ name: file.name, converted: true });
-//   };
-//   const handleSubmit = async (e: FormEvent) => {
-//     e.preventDefault();
-//     return await sendMessage();
-//   };
-
-//   const regenerateSlides = async () => {
-//     return await sendMessage();
-//   };
-
-//   return {
-//     inputText,
-//     setInputText,
-//     messages,
-//     fileInputRef,
-//     fileStatus,
-//     handleFileChange,
-//     handleSubmit,
-//     loading,
-//     error,
-//     setError,
-//     model,
-//     setModel,
-//     regenerateSlides,
-//   };
-// };
-
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { AppDispatch, RootState } from "../../../app/store";
@@ -133,6 +10,7 @@ import {
 } from "../../../app/store/slices/promptSlice";
 import { getContext } from "../../../entities";
 import { nanoid } from "@reduxjs/toolkit";
+import { v4 as uuidv4 } from 'uuid';
 
 interface ChatMessage {
   id: string;
@@ -164,7 +42,7 @@ export const useGeneration = () => {
 
   useEffect(() => {
     const aiMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       type: "ai",
       content: "Привет! Я помогу тебе создать презентацию по файлу.",
     };
@@ -178,7 +56,7 @@ export const useGeneration = () => {
     }
 
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       type: "user",
       content: inputText,
       file: selectedFile,
@@ -192,7 +70,7 @@ export const useGeneration = () => {
       dispatch(setLoading(true));
 
       const aiMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         type: "ai",
         content: "",
       };

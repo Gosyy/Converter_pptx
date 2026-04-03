@@ -60,7 +60,6 @@ def _get_gigachat_token(force_refresh: bool = False, auth_key: str | None = None
     _TOKEN_CACHE["expires_at"] = expires_at
     return token
 
-
 def call_model(
     messages: list[dict],
     api_key: str,

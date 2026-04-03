@@ -184,6 +184,7 @@
   "devDependencies": {
     "@craco/craco": "^7.1.0",
     "@types/react-color": "^3.0.13",
+    "baseline-browser-mapping": "^2.10.12",
     "browserify-zlib": "^0.2.0",
     "https-browserify": "^1.0.0",
     "node-polyfill-webpack-plugin": "^4.1.0",
