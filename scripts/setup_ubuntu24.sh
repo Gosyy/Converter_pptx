@@ -71,6 +71,13 @@ echo "[3/8] Prepare env files"
 
 echo "[4/8] Fill required .env values"
 upsert_env .env POSTGRES_USER postgres
+upsert_env .env NGINX_HTTP_PORT 80
+upsert_env .env NGINX_HTTPS_PORT 443
+upsert_env .env FRONTEND_PORT 3000
+upsert_env .env BACKEND_PORT 8000
+upsert_env .env BACKEND_INTERNAL_PORT 8000
+upsert_env .env POSTGRES_EXTERNAL_PORT 5432
+upsert_env .env RUST_SIDECAR_PORT 7001
 upsert_env .env POSTGRES_PASSWORD postgres
 upsert_env .env POSTGRES_DB converter
 upsert_env .env POSTGRES_HOST postgres
@@ -127,15 +134,15 @@ else
 fi
 
 echo "[8/8] Health checks"
-curl -fsS -I http://localhost:8000/api/docs >/dev/null
+curl -fsS -I "http://localhost:${BACKEND_PORT:-8000}/api/docs" >/dev/null
 if [[ "$RUN_FRONTEND" == "true" ]]; then
-  curl -fsS -I http://localhost:3000 >/dev/null
+  curl -fsS -I "http://localhost:${FRONTEND_PORT:-3000}" >/dev/null
 fi
 
 echo
 echo "Done. Endpoints:"
 if [[ "$RUN_FRONTEND" == "true" ]]; then
-  echo "  Frontend: 127.0.0.1:3000"
+  echo "  Frontend: 127.0.0.1:${FRONTEND_PORT:-3000}"
 fi
-echo "  Backend: 127.0.0.1:8000"
-echo "  Postgres: 127.0.0.1:5432"
+echo "  Backend: 127.0.0.1:${BACKEND_PORT:-8000}"
+echo "  Postgres: 127.0.0.1:${POSTGRES_EXTERNAL_PORT:-5432}"

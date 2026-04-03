@@ -110,9 +110,7 @@ export const SlidesList = () => {
             },
           }}
         >
-          <MenuItem value="GigaChat-2">GigaChat-2</MenuItem>
-          <MenuItem value="GigaChat-2-Pro">GigaChat-2-Pro</MenuItem>
-          <MenuItem value="GigaChat-2-Max">GigaChat-2-Max</MenuItem>
+          <MenuItem value="GigaChat-2">GigaChat 2.0</MenuItem>
         </Select>
       </Box>
       <AnimatePresence mode="popLayout">

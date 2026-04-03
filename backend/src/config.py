@@ -20,15 +20,11 @@ class _Settings(BaseSettings):
     SECRET_MANAGER_TIMEOUT: int = 5
 
     # Основные модели
-    DEFAULT_MODEL: str = "GigaChat-2-Pro"
+    DEFAULT_MODEL: str = "GigaChat-2"
     DEFAULT_EMBEDDING_MODEL: str = "openai/gpt-oss-120b"
     CROSS_ENCODER_MODEL: str = "google/gemma-3-12b-it"
     
-    DEFAULT_MODEL_VALUES: ClassVar[list[str]] = [
-        "GigaChat-2",
-        "GigaChat-2-Pro",
-        "GigaChat-2-Max"
-    ]
+    DEFAULT_MODEL_VALUES: ClassVar[list[str]] = ["GigaChat-2"]
 
     # Qdrant
     QDRANT_HOST: str = "http://localhost:6333"

@@ -17,7 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api", default="http://localhost:8000/api", help="Базовый URL API")
     parser.add_argument("--file", required=True, help="Путь к входному файлу")
     parser.add_argument("--text", required=True, help="Промпт пользователя")
-    parser.add_argument("--model", default="GigaChat-2-Pro", help="Название модели")
+    parser.add_argument("--model", default="GigaChat-2", help="Название модели")
     parser.add_argument(
         "--out",
         default="generated_presentation.md",

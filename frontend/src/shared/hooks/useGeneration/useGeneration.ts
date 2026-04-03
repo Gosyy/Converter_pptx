@@ -25,7 +25,7 @@ export const useGeneration = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [model, setModel] = useState<string>("GigaChat-2-Pro");
+  const [model, setModel] = useState<string>("GigaChat-2");
   const dispatch = useDispatch<AppDispatch>();
 
   const wsRef = useRef<WebSocket | null>(null);
