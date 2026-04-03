@@ -60,6 +60,59 @@ def _get_gigachat_token(force_refresh: bool = False, auth_key: str | None = None
     _TOKEN_CACHE["expires_at"] = expires_at
     return token
 
+_TOKEN_CACHE: dict[str, float | str] = {"access_token": "", "expires_at": 0.0}
+
+
+def _auth_header_value(auth_key: str | None = None) -> str:
+    value = (auth_key or settings.GIGACHAT_AUTH_KEY).strip()
+    if value.lower().startswith("basic "):
+        return value
+    return f"Basic {value}"
+
+
+def _get_gigachat_token(force_refresh: bool = False, auth_key: str | None = None) -> str:
+    now = time.time()
+    cached_token = str(_TOKEN_CACHE.get("access_token", ""))
+    expires_at = float(_TOKEN_CACHE.get("expires_at", 0.0))
+    if not force_refresh and cached_token and now < (expires_at - 30):
+        return cached_token
+
+    headers = {
+        "Authorization": _auth_header_value(auth_key),
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "RqUID": str(uuid.uuid4()),
+    }
+    resp = requests.post(
+        settings.GIGACHAT_OAUTH_URL,
+        headers=headers,
+        data={"scope": settings.GIGACHAT_SCOPE},
+        timeout=20,
+        verify=settings.GIGACHAT_VERIFY_SSL,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"GigaChat auth error {resp.status_code}: {resp.text}")
+
+    data = resp.json()
+    token = (data.get("access_token") or "").strip()
+    if not token:
+        raise RuntimeError(f"Missing access_token in GigaChat auth response: {data}")
+
+    expires_at_raw = data.get("expires_at")
+    expires_in_raw = data.get("expires_in")
+    expires_at = now + 30 * 60
+    if isinstance(expires_at_raw, (int, float)):
+        if expires_at_raw > 10_000_000_000:
+            expires_at = float(expires_at_raw) / 1000.0
+        else:
+            expires_at = float(expires_at_raw)
+    elif isinstance(expires_in_raw, (int, float)):
+        expires_at = now + float(expires_in_raw)
+
+    _TOKEN_CACHE["access_token"] = token
+    _TOKEN_CACHE["expires_at"] = expires_at
+    return token
+
 
 def call_model(
     messages: list[dict],

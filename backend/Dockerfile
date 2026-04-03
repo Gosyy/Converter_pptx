@@ -10,7 +10,7 @@ ENV HF_HOME=/models_cache/huggingface \
     TORCH_HOME=/models_cache/torch
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
