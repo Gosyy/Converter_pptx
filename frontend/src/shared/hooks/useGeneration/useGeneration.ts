@@ -133,6 +133,7 @@ import {
 } from "../../../app/store/slices/promptSlice";
 import { getContext } from "../../../entities";
 import { nanoid } from "@reduxjs/toolkit";
+import { v4 as uuidv4 } from 'uuid';
 
 interface ChatMessage {
   id: string;
@@ -164,7 +165,7 @@ export const useGeneration = () => {
 
   useEffect(() => {
     const aiMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       type: "ai",
       content: "Привет! Я помогу тебе создать презентацию по файлу.",
     };
@@ -178,7 +179,7 @@ export const useGeneration = () => {
     }
 
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       type: "user",
       content: inputText,
       file: selectedFile,
@@ -192,7 +193,7 @@ export const useGeneration = () => {
       dispatch(setLoading(true));
 
       const aiMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         type: "ai",
         content: "",
       };
