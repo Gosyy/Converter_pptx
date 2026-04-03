@@ -4,8 +4,6 @@ import { ReactComponent as LogoPC } from "../../../shared/assets/logo/logo-pc.sv
 import { ReactComponent as LogoPhone } from "../../../shared/assets/logo/logo-phone.svg";
 
 import LanguageIcon from "@mui/icons-material/Language";
-import TelegramIcon from "@mui/icons-material/Telegram";
-import GithubButton from "../blocks/components/GithubButton";
 import { useLocation } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { RootState } from "../../../app/store";
@@ -56,27 +54,6 @@ export const Footer: React.FC = () => {
           boxSizing: "border-box",
         }}
       >
-        <GithubButton isMobile={isMobile} />
-
-        <Button
-          component="a"
-          href="https://t.me/yukino_r"
-          target="_blank"
-          rel="noopener noreferrer"
-          variant="outlined"
-          fullWidth={isMobile}
-          sx={{
-            minWidth: 180,
-            height: 50,
-            textTransform: "none",
-            borderRadius: 2,
-            gap: 1,
-          }}
-        >
-          <TelegramIcon />
-          Telegram
-        </Button>
-
         <Button
           component="a"
           href="https://aifixed.onrender.com"

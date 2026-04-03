@@ -4,11 +4,11 @@ services:
   nginx:
     image: nginx:alpine
     ports:
-      - "80:80"
-      - "443:443"
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d/prod:/etc/nginx/conf.d/prod:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d/prod:ro
       - ./frontend/build:/usr/share/nginx/html:ro
       - ./certbot/conf:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
@@ -29,24 +29,72 @@ services:
     networks:
       - app-network
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        PRELOAD_MODEL_CACHE: "true"
     volumes:
       - ./backend:/code
+      - model_cache:/models_cache
     networks:
       - app-network
     ports:
-      - "8000:8000"
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn src.main:app --host 0.0.0.0 --port ${BACKEND_INTERNAL_PORT:-8000}
     environment:
       - ENVIRONMENT=production
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-converter}
+      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - FEATURE_RUST_SIDECAR=${FEATURE_RUST_SIDECAR:-false}
+      - FEATURE_KANDINSKY=${FEATURE_KANDINSKY:-false}
+      - FEATURE_PROGRESS_WS=${FEATURE_PROGRESS_WS:-true}
+      - RUST_SIDECAR_URL=${RUST_SIDECAR_URL:-http://rust-sidecar:7001}
+      - FRONT_URL=${FRONT_URL:-http://localhost:${FRONTEND_PORT:-3000}}
+      - DOMAIN=${DOMAIN:-http://localhost:${FRONTEND_PORT:-3000}}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:${FRONTEND_PORT:-3000}}
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-converter}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_EXTERNAL_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-converter}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  rust-sidecar:
+    build:
+      context: ./rust_sidecar
+      dockerfile: Dockerfile
+    profiles: ["rust"]
+    networks:
+      - app-network
+    ports:
+      - "${RUST_SIDECAR_PORT:-7001}:7001"
 
 volumes:
   postgres_prod_data:
+  model_cache:
 
 networks:
   app-network:
-    external: true
+    driver: bridge

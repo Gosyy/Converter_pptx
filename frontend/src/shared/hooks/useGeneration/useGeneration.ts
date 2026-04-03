@@ -24,7 +24,7 @@
 //   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 //   const fileInputRef = useRef<HTMLInputElement | null>(null);
 //   const dispatch = useDispatch<AppDispatch>();
-//   const [model, setModel] = useState<string>("google/gemma-3-12b-it");
+//   const [model, setModel] = useState<string>("GigaChat-2");
 //   const [fileStatus, setFileStatus] = useState<{
 //     name: string;
 //     converted: boolean;
@@ -147,7 +147,7 @@ export const useGeneration = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [model, setModel] = useState<string>("google/gemma-3-12b-it");
+  const [model, setModel] = useState<string>("GigaChat-2");
   const dispatch = useDispatch<AppDispatch>();
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -160,6 +160,7 @@ export const useGeneration = () => {
     name: string;
     converted: boolean;
   } | null>(null);
+  const [progressEvents, setProgressEvents] = useState<string[]>([]);
 
   useEffect(() => {
     const aiMsg: ChatMessage = {
@@ -201,74 +202,96 @@ export const useGeneration = () => {
       let allSlides: PlateSlide[] = [];
       let firstChunkReceived = false;
       let updateScheduled = false;
+      setProgressEvents([]);
 
-      await getContext(selectedFile!, model, (chunk) => {
-        fullText += chunk;
-
-        if (!firstChunkReceived) {
-          firstChunkReceived = true;
-          dispatch(setLoading(false));
-        }
-
-        setMessages((prev) =>
-          prev.map((m) => (m.id === aiMsg.id ? { ...m, content: fullText } : m))
-        );
-
-        const parts = fullText.split(/^#\s+/gm).filter((p) => p.trim() !== "");
-
-        const layouts: PlateSlide["layout"][] = [
-          "left-image",
-          "right-image",
-          "bottom-image",
-          "top-image",
-        ];
-
-        let layoutIndex = 0;
-
-        parts.forEach((part, index) => {
-          const slideText = "# " + part;
-          const titleMatch = slideText.match(/^#\s*(.+)/);
-          const title = titleMatch ? titleMatch[1] : "Slide";
-
-          const parsedSlides = markdownToSlides(slideText);
-          const parsed = parsedSlides[0] || {
-            content: [],
-            layout: "text-only",
-          };
-
-          const hasImage = parsed.content.some((b) => b.type === "image");
-          const layout = hasImage
-            ? layouts[layoutIndex % layouts.length]
-            : "text-only";
-
-          if (!allSlides[index]) {
-            allSlides[index] = {
-              id: nanoid(),
-              title,
-              markdownText: slideText,
-              content: parsed.content,
-              layout,
-            };
-          } else {
-            allSlides[index] = {
-              ...allSlides[index],
-              markdownText: slideText,
-              content: parsed.content,
-              layout,
-            };
-          }
-
-          if (hasImage) layoutIndex++;
-        });
-
-        if (!updateScheduled) {
-          updateScheduled = true;
-          setTimeout(() => {
-            dispatch(setSlides([...allSlides]));
-            updateScheduled = false;
-          }, 300);
+      const clientId = crypto.randomUUID();
+      const wsUrl = process.env.REACT_APP_API_URL
+        ?.replace(/^http/, "ws")
+        .replace(/\/api$/, `/api/presentation/progress/ws/${clientId}`);
+      const progressWs = wsUrl ? new WebSocket(wsUrl) : null;
+      progressWs?.addEventListener("message", (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          setProgressEvents((prev) => [...prev, `${payload.stage}: ${payload.status}`]);
+        } catch {
+          // no-op
         }
       });
+
+      await getContext(
+        selectedFile!,
+        model,
+        userMsg.content,
+        clientId,
+        (chunk) => {
+          fullText += chunk;
+
+          if (!firstChunkReceived) {
+            firstChunkReceived = true;
+            dispatch(setLoading(false));
+          }
+
+          setMessages((prev) =>
+            prev.map((m) => (m.id === aiMsg.id ? { ...m, content: fullText } : m))
+          );
+
+          const parts = fullText.split(/^#\s+/gm).filter((p) => p.trim() !== "");
+
+          const layouts: PlateSlide["layout"][] = [
+            "left-image",
+            "right-image",
+            "bottom-image",
+            "top-image",
+          ];
+
+          let layoutIndex = 0;
+
+          parts.forEach((part, index) => {
+            const slideText = "# " + part;
+            const titleMatch = slideText.match(/^#\s*(.+)/);
+            const title = titleMatch ? titleMatch[1] : "Slide";
+
+            const parsedSlides = markdownToSlides(slideText);
+            const parsed = parsedSlides[0] || {
+              content: [],
+              layout: "text-only",
+            };
+
+            const hasImage = parsed.content.some((b) => b.type === "image");
+            const layout = hasImage
+              ? layouts[layoutIndex % layouts.length]
+              : "text-only";
+
+            if (!allSlides[index]) {
+              allSlides[index] = {
+                id: nanoid(),
+                title,
+                markdownText: slideText,
+                content: parsed.content,
+                layout,
+              };
+            } else {
+              allSlides[index] = {
+                ...allSlides[index],
+                markdownText: slideText,
+                content: parsed.content,
+                layout,
+              };
+            }
+
+            if (hasImage) layoutIndex++;
+          });
+
+          if (!updateScheduled) {
+            updateScheduled = true;
+            setTimeout(() => {
+              dispatch(setSlides([...allSlides]));
+              updateScheduled = false;
+            }, 300);
+          }
+        }
+      );
+      progressWs?.close();
 
       setFileStatus({ name: selectedFile.name, converted: true });
       setSelectedFile(null);
@@ -322,5 +345,6 @@ export const useGeneration = () => {
     model,
     setModel,
     regenerateSlides,
+    progressEvents,
   };
 };

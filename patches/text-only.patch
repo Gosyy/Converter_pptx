@@ -1,0 +1,2532 @@
+diff --git a/README.md b/README.md
+index a84ca16..ffb2eb1 100644
+--- a/README.md
++++ b/README.md
+@@ -176,6 +176,21 @@ cp frontend/.env.example frontend/.env
+ docker-compose up --build
+ ```
+ 
++### Practical checklist (login → generation → editor)
++
++```bash
++./scripts/practical_checklist.sh
++```
++
++Скрипт делает полный цикл:
++1. Проверяет/создаёт `backend/.env` из `backend/.env.example`.
++2. Принудительно включает `USE_DATABASE=true`.
++3. Поднимает `postgres` через `docker compose`.
++4. Проверяет Python ML-зависимости (`torch`, `sentence_transformers`, `transformers`).
++5. Проверяет/создаёт `frontend/.env` и ставит `REACT_APP_API_URL=http://localhost:8000/api`.
++6. Поднимает `backend` и `frontend`.
++7. Проверяет endpoint логина и выводит URL для проверки `/generate` и `/editor`.
++
+ ### Доступ к приложению
+ 
+ - **Frontend**: http://localhost:3000
+@@ -191,11 +206,8 @@ docker-compose up --build
+ | `/`           | `PromptPage` — главная страница, знакомство с сервисом и отправка промпта |
+ | `/generate`   | `GeneratePage` — генерация контента на основе промпта |
+ | `/editor`     | `EditorPage` — редактор для доработки и сохранения сгенерированной презентации |
+-| `/auth`       | `AuthPage` - страница авторизации |
+ | `/settings`   | `SettingsPage` - настройки пользователя |
+-| `/projects` | `MyPresentationsPage` - список созданных презентаций (только для авторизованных пользователей) |
+-| `/verify-email` | `VerificationPage` - подтверждение кода при регистрации |
+-| `/auth/success` | `OAuthSuccess` - fallback-компонент успешной OAuth-авторизации |
++| `/projects` | `MyPresentationsPage` - список созданных презентаций |
+ 
+ Все страницы обернуты в компонент `PageWrapper` для единого оформления и управления макетом.
+ 
+@@ -265,27 +277,6 @@ POSTGRES_PASSWORD=password
+ POSTGRES_DB=yourdb
+ POSTGRES_HOST=localhost
+ POSTGRES_PORT=5432
+-
+-# JWT
+-SECRET_KEY=your_secret_key
+-ALGORITHM=HS256
+-
+-# SMTP
+-SMTP_HOST=smtp.gmail.com
+-SMTP_PORT=587
+-SMTP_USER=your_email@gmail.com
+-SMTP_PASSWORD=smtp_password
+-SMTP_FROM_EMAIL=your_email@gmail.com
+-
+-# GitHub OAuth
+-GITHUB_CLIENT_ID=github_client_id
+-GITHUB_CLIENT_SECRET=github_client_secret_key
+-GITHUB_REDIRECT_URI=http://localhost:8000/auth/github/callback
+-
+-# Google OAuth
+-GOOGLE_CLIENT_ID=google_client_id
+-GOOGLE_CLIENT_SECRET=google_client_secret_key
+-GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
+ FRONT_URL=http://localhost:3000
+ 
+ ```
+@@ -407,7 +398,7 @@ POST /api/presentation/save-presentation
+ ```
+ 
+ ```http
+-"Удаление презентации (для авторизованных пользователей)"
++"Удаление презентации"
+ 
+ DELETE /api/presentation/{presentation_id}
+ ```
+@@ -423,34 +414,12 @@ POST /api/presentation/edit
+ GET /api/files/{filename}
+ ```
+ 
+-#### Авторизация пользователя
++#### Guest mode endpoints
+ ```http
+-POST /api/auth/register
+-
+ POST /api/auth/login
+ 
+ GET /api/auth/me
+-```
+-
+-#### Верификация
+-```http
+-POST /api/auth/email/send_code
+-
+-POST /api/auth/email/verify
+-```
+-
+-#### OAuth 2.0
+-```https
+-GET /api/auth/github/login
+-GET /api/auth/github/callback
+-
+-GET /api/auth/google/login
+-GET /api/auth/google/callback
+-```
+-
+-#### Настройки пользователя
+-```http
+-PUT /api/user/edit
++POST /api/auth/logout
+ ```
+ 
+ #### Подробное описание маршрутов
+diff --git a/backend/.env.example b/backend/.env.example
+new file mode 100644
+index 0000000..d5811fb
+--- /dev/null
++++ b/backend/.env.example
+@@ -0,0 +1,24 @@
++# GigaChat
++GIGACHAT_AUTH_KEY=Authorization: Basic <base64-client-credentials>
++GIGACHAT_OAUTH_URL=https://ngw.devices.sberbank.ru:9443/api/v2/oauth
++GIGACHAT_API_URL=https://gigachat.devices.sberbank.ru/api/v1/chat/completions
++GIGACHAT_SCOPE=GIGACHAT_API_PERS
++GIGACHAT_VERIFY_SSL=true
++
++# Models
++DEFAULT_MODEL=GigaChat-2-Pro
++DEFAULT_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
++CROSS_ENCODER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
++PRELOAD_MODELS=false
++
++# App
++DOMAIN=http://localhost:3000
++FRONT_URL=http://localhost:3000
++
++# Database (enable if you need save/projects endpoints)
++USE_DATABASE=true
++POSTGRES_USER=postgres
++POSTGRES_PASSWORD=postgres
++POSTGRES_DB=converter
++POSTGRES_HOST=localhost
++POSTGRES_PORT=5432
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 302f27f..f1e279d 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -1,6 +1,7 @@
+ FROM python:3.11-slim
+ 
+ WORKDIR /code
++ARG PRELOAD_MODEL_CACHE=true
+ 
+ # Default model cache locations (can be overridden via environment)
+ ENV HF_HOME=/models_cache/huggingface \
+@@ -19,6 +20,9 @@ RUN mkdir -p /models_cache/huggingface/transformers \
+     /models_cache/torch && \
+     chmod -R 777 /models_cache
+ 
++# Optional warm cache during image build so runtime doesn't need internet
++RUN if [ "$PRELOAD_MODEL_CACHE" = "true" ]; then python scripts/preload_model_cache.py; fi
++
+ EXPOSE 8000
+ 
+-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+\ No newline at end of file
++CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+diff --git a/backend/scripts/preload_model_cache.py b/backend/scripts/preload_model_cache.py
+new file mode 100644
+index 0000000..791605d
+--- /dev/null
++++ b/backend/scripts/preload_model_cache.py
+@@ -0,0 +1,18 @@
++import os
++
++from sentence_transformers import CrossEncoder, SentenceTransformer
++
++embedding_model = os.getenv(
++    "DEFAULT_EMBEDDING_MODEL",
++    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
++)
++cross_encoder_model = os.getenv(
++    "CROSS_ENCODER_MODEL",
++    "cross-encoder/ms-marco-MiniLM-L-6-v2",
++)
++
++print(f"Downloading embedding model: {embedding_model}")
++SentenceTransformer(embedding_model)
++print(f"Downloading cross-encoder model: {cross_encoder_model}")
++CrossEncoder(cross_encoder_model)
++print("Model cache preload complete")
+diff --git a/backend/src/auth/dependencies.py b/backend/src/auth/dependencies.py
+deleted file mode 100644
+index b145ade..0000000
+--- a/backend/src/auth/dependencies.py
++++ /dev/null
+@@ -1,44 +0,0 @@
+-from fastapi import Depends, HTTPException, Cookie
+-from jose import jwt, JWTError
+-from sqlalchemy.orm import Session
+-from src.database import get_db
+-from src.config import settings
+-from src.schemas.user_schemas import User
+-
+-from typing import Optional
+-from src.database import get_db
+-from src.config import settings
+-from src.schemas.user_schemas import User
+-
+-def get_current_user(
+-    access_token: str = Cookie(None),
+-    db: Session = Depends(get_db)
+-):
+-    if not access_token:
+-        raise HTTPException(status_code=401, detail="Not authenticated")
+-    try:
+-        payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+-        user_id = payload.get("user_id")
+-        if not user_id:
+-            raise HTTPException(status_code=401, detail="Invalid token")
+-    except JWTError:
+-        raise HTTPException(status_code=401, detail="Invalid token")
+-    
+-    user = db.query(User).filter_by(id=user_id).first()
+-    if not user:
+-        raise HTTPException(status_code=401, detail="User not found")
+-    return user
+-
+-def get_current_user_optional(access_token: Optional[str] = Cookie(None), db: Session = Depends(get_db)) -> Optional[User]:
+-    if not access_token:
+-        return None
+-    try:
+-        payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+-        user_id = payload.get("user_id")
+-        if not user_id:
+-            return None
+-    except JWTError:
+-        return None
+-
+-    user = db.query(User).filter_by(id=user_id).first()
+-    return user
+diff --git a/backend/src/auth/email_verification.py b/backend/src/auth/email_verification.py
+deleted file mode 100644
+index 0079561..0000000
+--- a/backend/src/auth/email_verification.py
++++ /dev/null
+@@ -1,44 +0,0 @@
+-import random
+-from datetime import datetime, timedelta
+-import smtplib
+-from email.mime.text import MIMEText
+-from src.config import settings
+-
+-# временное хранилище кодов
+-email_verification_codes = {}  # {email: {"code": "123456", "expires": datetime}}
+-
+-def generate_verification_code():
+-    return f"{random.randint(100000, 999999)}"
+-
+-def set_verification_code(email: str):
+-    code = generate_verification_code()
+-    email_verification_codes[email] = {
+-        "code": code,
+-        "expires": datetime.utcnow() + timedelta(minutes=10)
+-    }
+-    return code
+-
+-def verify_code(email: str, code: str):
+-    entry = email_verification_codes.get(email)
+-    if not entry:
+-        return False
+-    if entry["code"] != code:
+-        return False
+-    if datetime.utcnow() > entry["expires"]:
+-        del email_verification_codes[email]
+-        return False
+-    del email_verification_codes[email]
+-    return True
+-
+-def send_verification_email(to_email: str, code: str):
+-    subject = "Email Verification Code"
+-    body = f"Ваш код подтверждения: {code}\nОн действителен 10 минут."
+-    msg = MIMEText(body)
+-    msg["Subject"] = subject
+-    msg["From"] = settings.SMTP_FROM_EMAIL
+-    msg["To"] = to_email
+-
+-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+-        server.starttls()
+-        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+-        server.send_message(msg)
+diff --git a/backend/src/auth/jwt_utils.py b/backend/src/auth/jwt_utils.py
+deleted file mode 100644
+index 1157f0e..0000000
+--- a/backend/src/auth/jwt_utils.py
++++ /dev/null
+@@ -1,21 +0,0 @@
+-from datetime import datetime, timedelta
+-from jose import jwt
+-from passlib.context import CryptContext
+-from src.config import settings
+-
+-pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+-
+-def hash_password(password: str):
+-    return pwd.hash(password[:72])
+-
+-def verify_password(password, hashed):
+-    return pwd.verify(password, hashed)
+-
+-def create_access_token(data: dict, expires_minutes: int = 60):
+-    to_encode = data.copy()
+-    now = datetime.utcnow()
+-    to_encode.update({
+-        "exp": now + timedelta(minutes=expires_minutes),
+-        "iat": now
+-    })
+-    return jwt.encode(to_encode, settings.SECRET_KEY, settings.ALGORITHM)
+diff --git a/backend/src/auth/oauth_github.py b/backend/src/auth/oauth_github.py
+deleted file mode 100644
+index 52bb89d..0000000
+--- a/backend/src/auth/oauth_github.py
++++ /dev/null
+@@ -1,89 +0,0 @@
+-from fastapi import APIRouter, Depends, HTTPException, Response
+-from fastapi.responses import RedirectResponse
+-from sqlalchemy.orm import Session
+-import requests
+-
+-from src.config import settings
+-from src.database import get_db
+-from src.schemas.user_schemas import User
+-from src.auth.jwt_utils import create_access_token
+-
+-COOKIE_NAME = "access_token"
+-
+-def set_auth_cookie(response: Response, token: str):
+-    response.set_cookie(
+-        key=COOKIE_NAME,
+-        value=token,
+-        httponly=True,
+-        max_age=60*60*24,
+-        secure=False,  # True в продакшене
+-        samesite="lax",
+-    )
+-
+-
+-
+-router = APIRouter(prefix="/auth/github")
+-
+-@router.get("/login")
+-def github_login():
+-    github_auth_url = (
+-        "https://github.com/login/oauth/authorize"
+-        f"?client_id={settings.GITHUB_CLIENT_ID}"
+-        f"&redirect_uri={settings.GITHUB_REDIRECT_URI}"
+-        "&scope=user:email"
+-    )
+-    return RedirectResponse(github_auth_url)
+-
+-@router.get("/callback")
+-def github_callback(code: str, db: Session = Depends(get_db)):
+-    token_res = requests.post(
+-        "https://github.com/login/oauth/access_token",
+-        headers={"Accept": "application/json"},
+-        data={
+-            "client_id": settings.GITHUB_CLIENT_ID,
+-            "client_secret": settings.GITHUB_CLIENT_SECRET,
+-            "code": code,
+-            "redirect_uri": settings.GITHUB_REDIRECT_URI,
+-        },
+-    ).json()
+-
+-    github_token = token_res.get("access_token")
+-    if not github_token:
+-        raise HTTPException(400, "Failed to get GitHub token")
+-
+-    user_info = requests.get(
+-        "https://api.github.com/user",
+-        headers={"Authorization": f"Bearer {github_token}"}
+-    ).json()
+-
+-    email = user_info.get("email")
+-    if not email:
+-        emails_data = requests.get(
+-            "https://api.github.com/user/emails",
+-            headers={"Authorization": f"Bearer {github_token}"}
+-        ).json()
+-        primary_email = next(
+-            (e["email"] for e in emails_data if e.get("primary") and e.get("verified")),
+-            None
+-        )
+-        email = primary_email
+-
+-    if not email:
+-        raise HTTPException(400, "GitHub account has no accessible email")
+-
+-    user = db.query(User).filter_by(email=email).first()
+-    if not user:
+-        user = User(
+-            email=email,
+-            provider="github",
+-            name=user_info.get("login"),
+-            avatar=user_info.get("avatar_url")
+-        )
+-        db.add(user)
+-        db.commit()
+-        db.refresh(user)
+-
+-    token = create_access_token({"user_id": user.id})
+-    response = RedirectResponse(settings.FRONT_URL)
+-    set_auth_cookie(response, token)
+-    return response
+diff --git a/backend/src/auth/oauth_google.py b/backend/src/auth/oauth_google.py
+deleted file mode 100644
+index 72f9aca..0000000
+--- a/backend/src/auth/oauth_google.py
++++ /dev/null
+@@ -1,77 +0,0 @@
+-from fastapi import APIRouter, Depends, HTTPException, Response
+-from fastapi.responses import RedirectResponse
+-from sqlalchemy.orm import Session
+-import requests
+-
+-from src.config import settings
+-from src.database import get_db
+-from src.schemas.user_schemas import User
+-from src.auth.jwt_utils import create_access_token
+-
+-
+-COOKIE_NAME = "access_token"
+-
+-def set_auth_cookie(response: Response, token: str):
+-    response.set_cookie(
+-        key=COOKIE_NAME,
+-        value=token,
+-        httponly=True,
+-        max_age=60*60*24,
+-        secure=False,  # True в продакшене
+-        samesite="lax",
+-    )
+-
+-router = APIRouter(prefix="/auth/google")
+-
+-@router.get("/login")
+-def google_login():
+-    google_url = (
+-        "https://accounts.google.com/o/oauth2/v2/auth"
+-        f"?client_id={settings.GOOGLE_CLIENT_ID}"
+-        f"&redirect_uri={settings.GOOGLE_REDIRECT_URI}"
+-        "&response_type=code&scope=email%20profile"
+-    )
+-    return RedirectResponse(google_url)
+-
+-@router.get("/callback")
+-def google_callback(code: str, db: Session = Depends(get_db)):
+-    token_res = requests.post(
+-        "https://oauth2.googleapis.com/token",
+-        data={
+-            "client_id": settings.GOOGLE_CLIENT_ID,
+-            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+-            "code": code,
+-            "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+-            "grant_type": "authorization_code",
+-        },
+-    ).json()
+-
+-    access_token = token_res.get("access_token")
+-    if not access_token:
+-        raise HTTPException(400, "Failed to get Google access token")
+-
+-    user_info = requests.get(
+-        "https://www.googleapis.com/oauth2/v2/userinfo",
+-        headers={"Authorization": f"Bearer {access_token}"},
+-    ).json()
+-
+-    email = user_info.get("email")
+-    if not email:
+-        raise HTTPException(400, "Google account has no accessible email")
+-
+-    user = db.query(User).filter_by(email=email).first()
+-    if not user:
+-        user = User(
+-            email=email,
+-            provider="google",
+-            name=user_info.get("name"),
+-            avatar=user_info.get("picture")
+-        )
+-        db.add(user)
+-        db.commit()
+-        db.refresh(user)
+-
+-    token = create_access_token({"user_id": user.id})
+-    response = RedirectResponse(settings.FRONT_URL)
+-    set_auth_cookie(response, token)
+-    return response
+diff --git a/backend/src/auth/schemas.py b/backend/src/auth/schemas.py
+deleted file mode 100644
+index c53145c..0000000
+--- a/backend/src/auth/schemas.py
++++ /dev/null
+@@ -1,21 +0,0 @@
+-from pydantic import BaseModel, EmailStr
+-
+-class RegisterSchema(BaseModel):
+-    name: str
+-    email: EmailStr
+-    password: str
+-
+-class LoginSchema(BaseModel):
+-    email: EmailStr
+-    password: str
+-
+-class TokenResponse(BaseModel):
+-    access_token: str
+-    token_type: str = "bearer"
+-
+-class EmailSchema(BaseModel):
+-    email: str
+-
+-class VerifyEmailSchema(BaseModel):
+-    email: str
+-    code: str
+\ No newline at end of file
+diff --git a/backend/src/auth/service.py b/backend/src/auth/service.py
+deleted file mode 100644
+index da4b8fe..0000000
+--- a/backend/src/auth/service.py
++++ /dev/null
+@@ -1,29 +0,0 @@
+-from fastapi import HTTPException
+-from sqlalchemy.orm import Session
+-from src.schemas.user_schemas import User
+-from .jwt_utils import hash_password, verify_password
+-
+-class AuthService:
+-
+-    @staticmethod
+-    def register(db: Session, name: str, email: str, password: str):
+-        if db.query(User).filter_by(email=email).first():
+-            raise HTTPException(400, "User already exists")
+-
+-        user = User(
+-            name=name,
+-            email=email,
+-            password=hash_password(password),
+-            provider="local"
+-        )
+-        db.add(user)
+-        db.commit()
+-        db.refresh(user)
+-        return user
+-
+-    @staticmethod
+-    def login(db: Session, email: str, password: str):
+-        user = db.query(User).filter_by(email=email).first()
+-        if not user or not user.password or not verify_password(password, user.password):
+-            raise HTTPException(400, "Invalid login or password")
+-        return user
+diff --git a/backend/src/config.py b/backend/src/config.py
+index 4289fd1..f0a9acf 100644
+--- a/backend/src/config.py
++++ b/backend/src/config.py
+@@ -4,7 +4,6 @@ import textwrap
+ from typing import ClassVar
+ 
+ from pydantic_settings import BaseSettings, SettingsConfigDict
+-from pydantic import EmailStr
+ 
+ 
+ class _Settings(BaseSettings):
+@@ -47,26 +46,6 @@ class _Settings(BaseSettings):
+     POSTGRES_HOST: str | None = None
+     POSTGRES_PORT: int = 5432
+ 
+-    # JWT
+-    SECRET_KEY: str
+-    ALGORITHM: str = "HS256"
+-
+-    # OAuth
+-    GITHUB_CLIENT_ID: str
+-    GITHUB_CLIENT_SECRET: str
+-    GITHUB_REDIRECT_URI: str
+-
+-    GOOGLE_CLIENT_ID: str
+-    GOOGLE_CLIENT_SECRET: str
+-    GOOGLE_REDIRECT_URI: str
+-
+-    # SMTP
+-    SMTP_HOST: str
+-    SMTP_PORT: int
+-    SMTP_USER: str
+-    SMTP_PASSWORD: str
+-    SMTP_FROM_EMAIL: EmailStr
+-
+     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+ 
+ 
+diff --git a/backend/src/main.py b/backend/src/main.py
+index 9d6c3ac..e78aaf4 100644
+--- a/backend/src/main.py
++++ b/backend/src/main.py
+@@ -2,7 +2,7 @@ from fastapi import FastAPI
+ from fastapi.middleware.cors import CORSMiddleware
+ import logging
+ 
+-from src.routes import file_routes, presentation_routes, test_routes, auth_routes, oauth_routes, user_routes
++from src.routes import file_routes, presentation_routes, test_routes, auth_routes
+ from src.preload import preload_models
+ from src.config import settings
+ 
+@@ -56,5 +56,3 @@ app.include_router(presentation_routes.router)
+ app.include_router(file_routes.router)
+ app.include_router(test_routes.router)
+ app.include_router(auth_routes.router)
+-app.include_router(user_routes.router)
+-app.include_router(oauth_routes.router)
+diff --git a/backend/src/routes/auth_routes.py b/backend/src/routes/auth_routes.py
+index 71f1cd1..27719d7 100644
+--- a/backend/src/routes/auth_routes.py
++++ b/backend/src/routes/auth_routes.py
+@@ -1,137 +1,55 @@
+-from fastapi import APIRouter, Depends, Response, HTTPException
+-from sqlalchemy.orm import Session
+-from src.database import get_db
+-from src.auth.schemas import RegisterSchema, LoginSchema, EmailSchema, VerifyEmailSchema
+-from src.auth.service import AuthService
+-from src.auth.jwt_utils import create_access_token
+-from src.schemas.user_schemas import User
+-from src.auth.email_verification import set_verification_code, send_verification_email
+-from src.auth.dependencies import get_current_user
++from fastapi import APIRouter, Response
++from pydantic import BaseModel, EmailStr
+ 
+ router = APIRouter(prefix="/auth", tags=["Auth"])
+-email_router = APIRouter(prefix="/email", tags=["Email Verification"])
+ 
+-COOKIE_NAME = "access_token"
++COOKIE_NAME = "guest_mode"
+ 
+-pending_registrations = {}
+-pending_email_changes = {}
+ 
++class LoginSchema(BaseModel):
++    email: EmailStr
++    password: str
+ 
+-def set_auth_cookie(response: Response, token: str):
++
++@router.post("/login")
++def login(data: LoginSchema, response: Response):
++    """
++    Guest-mode compatibility endpoint.
++    Authentication is removed from the project, so any login payload returns
++    a local guest profile and sets a harmless cookie for old clients.
++    """
+     response.set_cookie(
+         key=COOKIE_NAME,
+-        value=token,
++        value="enabled",
+         httponly=True,
+-        max_age=60*60*24,
+-        secure=False,  # True в продакшене
++        max_age=60 * 60 * 24,
++        secure=False,
+         samesite="lax",
+     )
+-
+-@router.post("/register")
+-def register(data: RegisterSchema):
+-    email = data.email
+-
+-    if email in pending_registrations:
+-        raise HTTPException(400, "Verification code already отправлен. Проверьте email.")
+-
+-    code = set_verification_code(email)
+-    pending_registrations[email] = {
+-        "name": data.name,
+-        "password": data.password,
+-        "code": code
+-    }
+-
+-    send_verification_email(email, code)
+-    return {"msg": "Код подтверждения отправлен на email"}
+-
+-@router.post("/login")
+-def login(data: LoginSchema, response: Response, db: Session = Depends(get_db)):
+-    user = AuthService.login(db, data.email, data.password)
+-    if not user.is_verified:
+-        raise HTTPException(403, "Email не подтверждён. Проверьте почту.")
+-    token = create_access_token({"user_id": user.id})
+-    set_auth_cookie(response, token)
+     return {
+-        "msg": "Вход выполнен",
+-        "user_id": user.id,
+-        "email": user.email,
+-        "name": user.name,
+-        "is_verified": user.is_verified,
+-        "provider": user.provider,
+-        "avatar": user.avatar,
++        "msg": "Guest mode enabled",
++        "user_id": 0,
++        "email": data.email,
++        "name": "Local User",
++        "is_verified": True,
++        "provider": "guest",
++        "avatar": None,
+     }
+ 
+ 
+-
+-@email_router.post("/send_code")
+-def send_code(data: EmailSchema, user: User = Depends(get_current_user)):
+-    new_email = data.email
+-    if new_email in pending_email_changes:
+-        raise HTTPException(400, "Код уже отправлен на этот email")
+-
+-    code = set_verification_code(new_email)
+-    pending_email_changes[new_email] = {"user_id": user.id, "code": code}
+-    send_verification_email(new_email, code)
+-    return {"msg": "Код подтверждения отправлен на новый email"}
+-
+-
+-@email_router.post("/verify")
+-def verify_email(data: VerifyEmailSchema, db: Session = Depends(get_db), response: Response = None):
+-    """
+-    Проверка кода подтверждения.
+-    1) Если есть в pending_registrations => регистрация
+-    2) Если есть в pending_email_changes => смена email
+-    """
+-    email = data.email
+-    code = data.code
+-
+-    pending_reg = pending_registrations.get(email)
+-    if pending_reg:
+-        if pending_reg["code"] != code:
+-            raise HTTPException(400, "Неверный или просроченный код")
+-
+-        user = AuthService.register(db, pending_reg["name"], email, pending_reg["password"])
+-        user.is_verified = True
+-        db.commit()
+-        db.refresh(user)
+-        del pending_registrations[email]
+-
+-        token = create_access_token({"user_id": user.id})
+-        if response:
+-            set_auth_cookie(response, token)
+-
+-        return {"msg": "Email подтверждён", "access_token": token}
+-
+-    pending_change = pending_email_changes.get(email)
+-    if pending_change:
+-        if pending_change["code"] != code:
+-            raise HTTPException(400, "Неверный или просроченный код")
+-
+-        user = db.query(User).filter_by(id=pending_change["user_id"]).first()
+-        if not user:
+-            raise HTTPException(404, "Пользователь не найден")
+-
+-        user.email = email
+-        db.commit()
+-        del pending_email_changes[email]
+-        return {"msg": "Email успешно изменён"}
+-
+-    raise HTTPException(404, "Нет ожидающего подтверждения для этого email")
+-
+ @router.get("/me")
+-def me(user: User = Depends(get_current_user)):
+-    """
+-    Возвращает информацию о текущем пользователе.
+-    Если не авторизован — возвращает 401.
+-    """
++def me():
+     return {
+-        "user_id": user.id,
+-        "email": user.email,
+-        "name": user.name,
+-        "is_verified": user.is_verified,
+-        "provider": user.provider,
+-        "avatar": user.avatar
++        "user_id": 0,
++        "email": "guest@local",
++        "name": "Local User",
++        "is_verified": True,
++        "provider": "guest",
++        "avatar": None,
+     }
+ 
+ 
+-router.include_router(email_router)
++@router.post("/logout")
++def logout(response: Response):
++    response.delete_cookie(COOKIE_NAME)
++    return {"msg": "Guest mode disabled"}
+diff --git a/backend/src/routes/message_routes.py b/backend/src/routes/message_routes.py
+deleted file mode 100644
+index 0588f2e..0000000
+--- a/backend/src/routes/message_routes.py
++++ /dev/null
+@@ -1,36 +0,0 @@
+-from fastapi import Depends, HTTPException
+-from sqlalchemy.orm import Session
+-from fastapi import APIRouter, Depends, Form, File, UploadFile
+-from typing import Annotated
+-from src.database import get_db
+-from src.auth.dependencies import get_current_user_optional
+-from src.schemas.user_schemas import Presentation
+-from src.services.conver_file_service import convert_file
+-from src.services.model_services import run_prompt
+-
+-router = APIRouter()
+-
+-@router.post("/message", status_code=200)
+-async def send_message(
+-    text: Annotated[str, Form(min_length=1)],
+-    file: Annotated[UploadFile, File()],
+-    db: Session = Depends(get_db),
+-    current_user = Depends(get_current_user_optional),
+-):
+-    context = await convert_file(file)
+-    model_res = run_prompt(text, context)
+-
+-    pres_id = None
+-    if current_user:
+-        pres = Presentation(
+-            user_id=current_user.id,
+-            title=text[:50],
+-            content=model_res,
+-        )
+-        db.add(pres)
+-        db.commit()
+-        db.refresh(pres)
+-        pres_id = pres.id
+-
+-    return {"presentation_id": pres_id, "content": model_res}
+-
+diff --git a/backend/src/routes/oauth_routes.py b/backend/src/routes/oauth_routes.py
+deleted file mode 100644
+index 6c354e0..0000000
+--- a/backend/src/routes/oauth_routes.py
++++ /dev/null
+@@ -1,8 +0,0 @@
+-from fastapi import APIRouter
+-
+-from src.auth.oauth_github import router as github_router
+-from src.auth.oauth_google import router as google_router
+-
+-router = APIRouter()
+-router.include_router(github_router)
+-router.include_router(google_router)
+\ No newline at end of file
+diff --git a/backend/src/routes/presentation_routes.py b/backend/src/routes/presentation_routes.py
+index 79e44b9..1ad08c9 100644
+--- a/backend/src/routes/presentation_routes.py
++++ b/backend/src/routes/presentation_routes.py
+@@ -11,8 +11,7 @@ from fastapi import (
+ from sqlalchemy.orm import Session
+ from fastapi import APIRouter, Depends
+ from src.database import get_db
+-from src.schemas.user_schemas import Presentation, User
+-from src.auth.dependencies import get_current_user
++from src.schemas.user_schemas import Presentation
+ from typing import Annotated
+ import json
+ from typing import Annotated
+@@ -41,22 +40,17 @@ router = APIRouter(prefix="/presentation")
+ 
+ @router.get("/my-presentations")
+ def my_presentations(
+-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
++    db: Session = Depends(get_db),
+ ):
+-    return db.query(Presentation).filter_by(user_id=current_user.id).all()
++    return db.query(Presentation).all()
+ 
+ 
+ @router.delete("/presentations/{presentation_id}")
+ def delete_presentation(
+     presentation_id: str,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(get_current_user),
+ ):
+-    pres = (
+-        db.query(Presentation)
+-        .filter_by(id=presentation_id, user_id=current_user.id)
+-        .first()
+-    )
++    pres = db.query(Presentation).filter_by(id=presentation_id).first()
+     if not pres:
+         raise HTTPException(status_code=404, detail="Presentation not found")
+ 
+@@ -69,17 +63,13 @@ def delete_presentation(
+ def save_presentation(
+     data: SavePresentationSchema,
+     db: Session = Depends(get_db),
+-    current_user: User = Depends(get_current_user),
+ ):
+-    if not current_user:
+-        raise HTTPException(status_code=401, detail="Not authenticated")
+-
+     # создаём новую презентацию, если id нет
+     if not data.id:
+         data.id = str(uuid4())
+         pres = Presentation(
+             id=data.id,
+-            user_id=current_user.id,
++            user_id=None,
+             title=data.title,
+             content=data.content,
+             theme=data.theme,
+@@ -89,14 +79,14 @@ def save_presentation(
+         # пытаемся найти презентацию по id и пользователю
+         pres = (
+             db.query(Presentation)
+-            .filter_by(id=data.id, user_id=current_user.id)
++            .filter_by(id=data.id)
+             .first()
+         )
+         if not pres:
+             # если не нашли — создаём новую
+             pres = Presentation(
+                 id=data.id,
+-                user_id=current_user.id,
++                user_id=None,
+                 title=data.title,
+                 content=data.content,
+                 theme=data.theme,
+diff --git a/backend/src/routes/user_routes.py b/backend/src/routes/user_routes.py
+deleted file mode 100644
+index 7d0983e..0000000
+--- a/backend/src/routes/user_routes.py
++++ /dev/null
+@@ -1,38 +0,0 @@
+-from fastapi import APIRouter, Depends, HTTPException, Response
+-from sqlalchemy.orm import Session
+-from src.database import get_db
+-from src.auth.dependencies import get_current_user
+-from src.schemas.user_schemas import UpdateUserSchema, UserSchema, User
+-from src.auth.email_verification import set_verification_code, send_verification_email
+-from src.routes.auth_routes import pending_email_changes
+-
+-router = APIRouter(prefix="/user", tags=["User"])
+-
+-@router.put("/edit", response_model=UserSchema)
+-def edit_user(
+-    payload: UpdateUserSchema,
+-    db: Session = Depends(get_db),
+-    current_user: User = Depends(get_current_user),
+-):
+-    user = db.query(User).filter(User.id == current_user.id).first()
+-    if not user:
+-        raise HTTPException(status_code=404, detail="User not found")
+-
+-    if payload.name is not None:
+-        user.name = payload.name
+-
+-    if payload.email is not None and payload.email != user.email:
+-        existing = db.query(User).filter(User.email == payload.email, User.id != user.id).first()
+-        if existing:
+-            raise HTTPException(status_code=400, detail="Email уже используется")
+-
+-        user.new_email = payload.email
+-        user.is_verified = False
+-
+-        code = set_verification_code(payload.email)
+-        pending_email_changes[payload.email] = {"user_id": user.id, "code": code}
+-        send_verification_email(payload.email, code)
+-
+-    db.commit()
+-    db.refresh(user)
+-    return user
+\ No newline at end of file
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 339beb9..1fedd99 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -34,8 +34,11 @@ services:
+     build:
+       context: ./backend
+       dockerfile: Dockerfile
++      args:
++        PRELOAD_MODEL_CACHE: "true"
+     volumes:
+       - ./backend:/code
++      - model_cache:/models_cache
+     networks:
+       - app-network
+     ports:
+@@ -73,6 +76,7 @@ services:
+ 
+ volumes:
+   postgres_prod_data:
++  model_cache:
+ 
+ networks:
+   app-network:
+diff --git a/frontend/.env.example b/frontend/.env.example
+new file mode 100644
+index 0000000..808e131
+--- /dev/null
++++ b/frontend/.env.example
+@@ -0,0 +1 @@
++REACT_APP_API_URL=http://localhost:8000/api
+diff --git a/frontend/package-lock.json b/frontend/package-lock.json
+index c5d6488..c513d3f 100644
+--- a/frontend/package-lock.json
++++ b/frontend/package-lock.json
+@@ -19498,6 +19498,23 @@
+         }
+       }
+     },
++    "node_modules/tailwindcss/node_modules/yaml": {
++      "version": "2.8.3",
++      "resolved": "https://registry.npmjs.org/yaml/-/yaml-2.8.3.tgz",
++      "integrity": "sha512-AvbaCLOO2Otw/lW5bmh9d/WEdcDFdQp2Z2ZUH3pX9U2ihyUY0nvLv7J6TrWowklRGPYbB/IuIMfYgxaCPg5Bpg==",
++      "license": "ISC",
++      "optional": true,
++      "peer": true,
++      "bin": {
++        "yaml": "bin.mjs"
++      },
++      "engines": {
++        "node": ">= 14.6"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/eemeli"
++      }
++    },
+     "node_modules/tapable": {
+       "version": "2.3.0",
+       "resolved": "https://registry.npmjs.org/tapable/-/tapable-2.3.0.tgz",
+diff --git a/frontend/src/entities/auth/api/authApi.ts b/frontend/src/entities/auth/api/authApi.ts
+deleted file mode 100644
+index eb8279d..0000000
+--- a/frontend/src/entities/auth/api/authApi.ts
++++ /dev/null
+@@ -1,62 +0,0 @@
+-import { LoginPayload, RegisterPayload, AuthUser } from "../model/types";
+-
+-const API_URL = process.env.REACT_APP_API_URL;
+-
+-export const login = async ({
+-  email,
+-  password,
+-}: LoginPayload): Promise<AuthUser> => {
+-  const res = await fetch(`${API_URL}/auth/login`, {
+-    method: "POST",
+-    credentials: "include",
+-    headers: { "Content-Type": "application/json" },
+-    body: JSON.stringify({ email, password }),
+-  });
+-
+-  if (!res.ok) throw new Error("Ошибка входа");
+-
+-  return res.json();
+-};
+-
+-export const register = async ({
+-  name,
+-  email,
+-  password,
+-}: RegisterPayload): Promise<AuthUser> => {
+-  const res = await fetch(`${API_URL}/auth/register`, {
+-    method: "POST",
+-    credentials: "include",
+-    headers: { "Content-Type": "application/json" },
+-    body: JSON.stringify({ name, email, password }),
+-  });
+-
+-  if (!res.ok) throw new Error("Ошибка регистрации");
+-
+-  return res.json();
+-};
+-
+-export const me = async (): Promise<AuthUser> => {
+-  const res = await fetch(`${API_URL}/auth/me`, {
+-    method: "GET",
+-    credentials: "include",
+-  });
+-
+-  if (!res.ok) throw new Error("Not logged in");
+-
+-  return res.json();
+-};
+-
+-export const sendVerificationCode = async (email: string) => {
+-  await fetch(`${API_URL}/auth/email/send_code`, {
+-    method: "POST",
+-    headers: { "Content-Type": "application/json" },
+-    body: JSON.stringify({ email }),
+-  });
+-};
+-
+-export const logoutApi = async () => {
+-  await fetch(`${API_URL}/auth/logout`, {
+-    method: "POST",
+-    credentials: "include",
+-  });
+-};
+diff --git a/frontend/src/entities/auth/api/verification.ts b/frontend/src/entities/auth/api/verification.ts
+deleted file mode 100644
+index 39a5861..0000000
+--- a/frontend/src/entities/auth/api/verification.ts
++++ /dev/null
+@@ -1,21 +0,0 @@
+-export const handleVerification = async (
+-  userEmail: string,
+-  verificationCode: string
+-) => {
+-  const res = await fetch(
+-    `${process.env.REACT_APP_API_URL}/auth/email/verify`,
+-    {
+-      method: "POST",
+-      headers: { "Content-Type": "application/json" },
+-      body: JSON.stringify({
+-        email: userEmail,
+-        code: verificationCode,
+-      }),
+-      credentials: "include",
+-    }
+-  );
+-
+-  if (!res.ok) throw new Error("Ошибка подтверждения");
+-
+-  return res.json();
+-};
+diff --git a/frontend/src/entities/auth/index.ts b/frontend/src/entities/auth/index.ts
+deleted file mode 100644
+index 90fc312..0000000
+--- a/frontend/src/entities/auth/index.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-export * from "./api/authApi";
+-export * from "./api/verification";
+diff --git a/frontend/src/entities/auth/model/types.ts b/frontend/src/entities/auth/model/types.ts
+deleted file mode 100644
+index a9ac0ae..0000000
+--- a/frontend/src/entities/auth/model/types.ts
++++ /dev/null
+@@ -1,19 +0,0 @@
+-export interface AuthUser {
+-  user_id: number;
+-  email: string;
+-  name: string;
+-  is_verified: boolean;
+-  provider?: string;
+-  avatar?: string;
+-}
+-
+-export interface LoginPayload {
+-  email: string;
+-  password: string;
+-}
+-
+-export interface RegisterPayload {
+-  name: string;
+-  email: string;
+-  password: string;
+-}
+diff --git a/frontend/src/entities/github/api/getStars.ts b/frontend/src/entities/github/api/getStars.ts
+deleted file mode 100644
+index f4cba44..0000000
+--- a/frontend/src/entities/github/api/getStars.ts
++++ /dev/null
+@@ -1,41 +0,0 @@
+-export async function getGithubStars() {
+-  const CACHE_KEY = process.env.REACT_APP_CACHE_KEY || "github_stars";
+-  const CACHE_TIME = Number(process.env.REACT_APP_CACHE_TIME) || 1000 * 60 * 60;
+-  const API = process.env.REACT_APP_GITHUB_API;
+-
+-  const cached = localStorage.getItem(CACHE_KEY);
+-
+-  if (cached) {
+-    try {
+-      const parsed = JSON.parse(cached);
+-      const age = Date.now() - parsed.timestamp;
+-
+-      if (age < CACHE_TIME) {
+-        return parsed.stars;
+-      }
+-    } catch (e) {
+-      console.error("Cache parse error:", e);
+-    }
+-  }
+-
+-  try {
+-    const response = await fetch(API!);
+-    const data = await response.json();
+-
+-    if (data.stargazers_count !== undefined) {
+-      localStorage.setItem(
+-        CACHE_KEY,
+-        JSON.stringify({
+-          stars: data.stargazers_count,
+-          timestamp: Date.now(),
+-        })
+-      );
+-
+-      return data.stargazers_count;
+-    }
+-  } catch (e) {
+-    console.error("GitHub fetch error:", e);
+-  }
+-
+-  return null;
+-}
+diff --git a/frontend/src/entities/github/index.ts b/frontend/src/entities/github/index.ts
+deleted file mode 100644
+index 79cd861..0000000
+--- a/frontend/src/entities/github/index.ts
++++ /dev/null
+@@ -1 +0,0 @@
+-export * from "./api/getStars";
+diff --git a/frontend/src/entities/index.ts b/frontend/src/entities/index.ts
+index 47eda77..7461457 100644
+--- a/frontend/src/entities/index.ts
++++ b/frontend/src/entities/index.ts
+@@ -1,2 +1 @@
+ export * from "./presentation";
+-export * from "./github";
+diff --git a/frontend/src/features/auth/blocks/components/LoginBlock/LoginBlock.tsx b/frontend/src/features/auth/blocks/components/LoginBlock/LoginBlock.tsx
+deleted file mode 100644
+index 2425a80..0000000
+--- a/frontend/src/features/auth/blocks/components/LoginBlock/LoginBlock.tsx
++++ /dev/null
+@@ -1,51 +0,0 @@
+-import { Box, TextField, Button, Typography } from "@mui/material";
+-import React, { useState } from "react";
+-
+-function LoginBlock({
+-  onLogin,
+-}: {
+-  onLogin: (email: string, password: string) => Promise<void>;
+-}) {
+-  const [email, setEmail] = useState("");
+-  const [password, setPassword] = useState("");
+-
+-  return (
+-    <Box
+-      sx={{
+-        display: "flex",
+-        flexDirection: "column",
+-        gap: 2,
+-      }}
+-    >
+-      <Typography variant="h5" fontWeight={600}>
+-        Вход
+-      </Typography>
+-
+-      <TextField
+-        label="Email"
+-        fullWidth
+-        variant="outlined"
+-        onChange={(e) => setEmail(e.target.value)}
+-      />
+-      <TextField
+-        label="Пароль"
+-        type="password"
+-        fullWidth
+-        variant="outlined"
+-        onChange={(e) => setPassword(e.target.value)}
+-      />
+-
+-      <Button
+-        variant="contained"
+-        color="primary"
+-        fullWidth
+-        sx={{ mt: 1, py: 1.3 }}
+-        onClick={() => onLogin(email, password)}
+-      >
+-        Войти
+-      </Button>
+-    </Box>
+-  );
+-}
+-
+-export default LoginBlock;
+diff --git a/frontend/src/features/auth/blocks/components/LoginBlock/index.ts b/frontend/src/features/auth/blocks/components/LoginBlock/index.ts
+deleted file mode 100644
+index 16bcdb1..0000000
+--- a/frontend/src/features/auth/blocks/components/LoginBlock/index.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-import LoginBlock from "./LoginBlock";
+-
+-export default LoginBlock;
+diff --git a/frontend/src/features/auth/blocks/components/RegistrationBlock/RegistrationBlock.tsx b/frontend/src/features/auth/blocks/components/RegistrationBlock/RegistrationBlock.tsx
+deleted file mode 100644
+index 9571b02..0000000
+--- a/frontend/src/features/auth/blocks/components/RegistrationBlock/RegistrationBlock.tsx
++++ /dev/null
+@@ -1,67 +0,0 @@
+-import { Box, TextField, Button, Typography } from "@mui/material";
+-import React, { useState } from "react";
+-
+-function RegistrationBlock({
+-  onRegister,
+-}: {
+-  onRegister: (name: string, email: string, password: string) => Promise<void>;
+-}) {
+-  const [name, setName] = useState("");
+-  const [email, setEmail] = useState("");
+-  const [password, setPassword] = useState("");
+-  const [password2, setPassword2] = useState("");
+-
+-  return (
+-    <Box
+-      sx={{
+-        display: "flex",
+-        flexDirection: "column",
+-        gap: 2,
+-      }}
+-    >
+-      <Typography variant="h5" fontWeight={600}>
+-        Регистрация
+-      </Typography>
+-
+-      <TextField
+-        label="Имя"
+-        fullWidth
+-        variant="outlined"
+-        onChange={(e) => setName(e.target.value)}
+-      />
+-      <TextField
+-        label="Email"
+-        fullWidth
+-        variant="outlined"
+-        onChange={(e) => setEmail(e.target.value)}
+-      />
+-      <TextField
+-        label="Пароль"
+-        type="password"
+-        fullWidth
+-        variant="outlined"
+-        onChange={(e) => setPassword(e.target.value)}
+-      />
+-      <TextField
+-        label="Повторите пароль"
+-        type="password"
+-        fullWidth
+-        variant="outlined"
+-        onChange={(e) => setPassword2(e.target.value)}
+-      />
+-
+-      <Button
+-        disabled={password !== password2}
+-        variant="contained"
+-        color="primary"
+-        fullWidth
+-        sx={{ mt: 1, py: 1.3 }}
+-        onClick={() => onRegister(name, email, password)}
+-      >
+-        Создать аккаунт
+-      </Button>
+-    </Box>
+-  );
+-}
+-
+-export default RegistrationBlock;
+diff --git a/frontend/src/features/auth/blocks/components/RegistrationBlock/index.ts b/frontend/src/features/auth/blocks/components/RegistrationBlock/index.ts
+deleted file mode 100644
+index b3fe64f..0000000
+--- a/frontend/src/features/auth/blocks/components/RegistrationBlock/index.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-import RegistrationBlock from "./RegistrationBlock";
+-
+-export default RegistrationBlock;
+diff --git a/frontend/src/features/auth/blocks/components/VerificationBlock/VerificationBlock.tsx b/frontend/src/features/auth/blocks/components/VerificationBlock/VerificationBlock.tsx
+deleted file mode 100644
+index c9529ac..0000000
+--- a/frontend/src/features/auth/blocks/components/VerificationBlock/VerificationBlock.tsx
++++ /dev/null
+@@ -1,82 +0,0 @@
+-import {
+-  Alert,
+-  Box,
+-  Button,
+-  Snackbar,
+-  TextField,
+-  Typography,
+-  useMediaQuery,
+-  useTheme,
+-} from "@mui/material";
+-import { useVerify } from "../../hooks";
+-
+-function VerificationBlock() {
+-  const isMobile = useMediaQuery(useTheme().breakpoints.down("md"));
+-  const {
+-    userEmail,
+-    verificationCode,
+-    setVerificationCode,
+-    handleVerifyCode,
+-    snackbarMessage,
+-    snackbarOpen,
+-    snackbarSeverity,
+-    handleCloseSnackbar,
+-  } = useVerify();
+-  return (
+-    <>
+-      <Box
+-        sx={{
+-          maxWidth: 400,
+-          mx: "auto",
+-          p: 3,
+-          border: "1px solid",
+-          borderColor: isMobile ? "rgba(0,0,0,0)" : "divider",
+-          borderRadius: 2,
+-          bgcolor: "background.paper",
+-          display: "flex",
+-          flexDirection: "column",
+-          gap: 2,
+-        }}
+-      >
+-        <Typography variant="h6" textAlign="center">
+-          Подтверждение email
+-        </Typography>
+-        <Typography variant="body2" color="text.secondary" textAlign="center">
+-          На адрес <strong>{userEmail}</strong> был отправлен код подтверждения.
+-        </Typography>
+-        <TextField
+-          label="Код подтверждения"
+-          type="text"
+-          fullWidth
+-          value={verificationCode}
+-          onChange={(e) => setVerificationCode(e.target.value)}
+-        />
+-        <Button
+-          variant="contained"
+-          color="primary"
+-          fullWidth
+-          onClick={handleVerifyCode}
+-        >
+-          Подтвердить
+-        </Button>
+-      </Box>
+-
+-       <Snackbar
+-        open={snackbarOpen}
+-        autoHideDuration={3000}
+-        onClose={handleCloseSnackbar}
+-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+-      >
+-        <Alert
+-          onClose={handleCloseSnackbar}
+-          severity={snackbarSeverity}
+-          sx={{ width: "100%" }}
+-        >
+-          {snackbarMessage}
+-        </Alert>
+-      </Snackbar>
+-    </>
+-  );
+-}
+-
+-export default VerificationBlock;
+diff --git a/frontend/src/features/auth/blocks/components/VerificationBlock/index.ts b/frontend/src/features/auth/blocks/components/VerificationBlock/index.ts
+deleted file mode 100644
+index a904046..0000000
+--- a/frontend/src/features/auth/blocks/components/VerificationBlock/index.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-import VerificationBlock from "./VerificationBlock";
+-
+-export default VerificationBlock;
+diff --git a/frontend/src/features/auth/blocks/hooks/index.ts b/frontend/src/features/auth/blocks/hooks/index.ts
+deleted file mode 100644
+index b0791bb..0000000
+--- a/frontend/src/features/auth/blocks/hooks/index.ts
++++ /dev/null
+@@ -1 +0,0 @@
+-export * from "./useVerify/useVerify";
+diff --git a/frontend/src/features/auth/blocks/hooks/useVerify/useVerify.ts b/frontend/src/features/auth/blocks/hooks/useVerify/useVerify.ts
+deleted file mode 100644
+index 403afff..0000000
+--- a/frontend/src/features/auth/blocks/hooks/useVerify/useVerify.ts
++++ /dev/null
+@@ -1,51 +0,0 @@
+-import { AlertColor } from "@mui/material";
+-import { useState } from "react";
+-import { useNavigate, useSearchParams } from "react-router-dom";
+-import { handleVerification } from "../../../../../entities/auth";
+-
+-export const useVerify = () => {
+-  const [verificationCode, setVerificationCode] = useState("");
+-  const [userEmail, setUserEmail] = useState(
+-    new URLSearchParams(window.location.search).get("email") || ""
+-  );
+-
+-  const [snackbarOpen, setSnackbarOpen] = useState(false);
+-  const [snackbarMessage, setSnackbarMessage] = useState("");
+-  const [snackbarSeverity, setSnackbarSeverity] = useState<AlertColor>("error");
+-
+-  const navigate = useNavigate();
+-
+-  const handleVerifyCode = async () => {
+-    try {
+-      const data = handleVerification(userEmail, verificationCode);
+-
+-      setSnackbarMessage("Email успешно подтвержден!");
+-      setSnackbarSeverity("success");
+-      setSnackbarOpen(true);
+-
+-      setTimeout(() => {
+-        navigate("/");
+-      }, 1500);
+-    } catch (err) {
+-      console.error(err);
+-      setSnackbarMessage("Неверный код или истек срок действия");
+-      setSnackbarSeverity("error");
+-      setSnackbarOpen(true);
+-    }
+-  };
+-
+-  const handleCloseSnackbar = () => {
+-    setSnackbarOpen(false);
+-  };
+-
+-  return {
+-    userEmail,
+-    verificationCode,
+-    setVerificationCode,
+-    handleVerifyCode,
+-    snackbarMessage,
+-    snackbarOpen,
+-    snackbarSeverity,
+-    handleCloseSnackbar,
+-  };
+-};
+diff --git a/frontend/src/features/auth/index.ts b/frontend/src/features/auth/index.ts
+deleted file mode 100644
+index ef0c9c5..0000000
+--- a/frontend/src/features/auth/index.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-export * from "./blocks/components/LoginBlock";
+-export * from "./blocks/components/RegistrationBlock";
+-export * from "./ui";
+diff --git a/frontend/src/features/auth/ui/Authorization.tsx b/frontend/src/features/auth/ui/Authorization.tsx
+deleted file mode 100644
+index b39e532..0000000
+--- a/frontend/src/features/auth/ui/Authorization.tsx
++++ /dev/null
+@@ -1,183 +0,0 @@
+-import {
+-  Box,
+-  Tabs,
+-  Tab,
+-  Paper,
+-  Button,
+-  Typography,
+-  Container,
+-  Divider,
+-  useMediaQuery,
+-  useTheme,
+-  Snackbar,
+-  Alert,
+-} from "@mui/material";
+-import { motion, AnimatePresence } from "framer-motion";
+-import LoginBlock from "../blocks/components/LoginBlock";
+-import RegistrationBlock from "../blocks/components/RegistrationBlock";
+-import GoogleIcon from "@mui/icons-material/Google";
+-import GithubIcon from "@mui/icons-material/GitHub";
+-import { useLocation, useNavigate } from "react-router-dom";
+-import { useAuth } from "./hooks";
+-import { useTabsChange } from "./hooks/useTabsChange/useTabsChange";
+-import { LoadingOverlay } from "../../../shared/components";
+-
+-function Authorization() {
+-  const isMobile = useMediaQuery(useTheme().breakpoints.down("md"));
+-  const location = useLocation();
+-
+-  const { tab, handleTabChange, height, hiddenRef } = useTabsChange(location);
+-
+-  const { handleLogin, handleRegister, isLoading, snackbar, setSnackbar } =
+-    useAuth();
+-
+-  if (isLoading) return <LoadingOverlay title="Подождите" />;
+-
+-  return (
+-    <Box
+-      sx={{
+-        width: "100%",
+-        minHeight: "95vh",
+-        bgcolor: "background.default",
+-        display: "flex",
+-        justifyContent: "center",
+-        alignItems: isMobile ? undefined : "center",
+-        p: isMobile ? 0 : 2,
+-      }}
+-    >
+-      <Container
+-        sx={{
+-          height: "70vh",
+-          display: "flex",
+-          maxWidth: "1000px !important",
+-        }}
+-      >
+-        <Box
+-          sx={{
+-            display: "flex",
+-            flexDirection: isMobile ? "column" : "row",
+-            gap: isMobile ? 2 : 4,
+-            alignItems: "flex-start",
+-            justifyContent: isMobile ? "flex-start" : "center",
+-            pt: isMobile ? 2 : undefined,
+-            width: "100%",
+-            height: "100%",
+-          }}
+-        >
+-          <Box
+-            sx={{
+-              display: "flex",
+-              flexDirection: "column",
+-              gap: 2,
+-              height: isMobile ? "auto" : "100%",
+-              width: isMobile ? "100%" : "50%",
+-            }}
+-          > 
+-            <Button
+-              variant="outlined"
+-              color="primary"
+-              onClick={() => window.location.href = `${process.env.REACT_APP_API_URL}/auth/google/login`}
+-              sx={{
+-                display: "flex",
+-                alignItems: "center",
+-                gap: 2,
+-              }}
+-            >
+-              <GoogleIcon />
+-              <Typography>Войти через Google</Typography>
+-            </Button>
+-            <Button
+-              variant="outlined"
+-              color="primary"
+-              onClick={() => window.location.href = `${process.env.REACT_APP_API_URL}/auth/github/login`}
+-              sx={{
+-                display: "flex",
+-                alignItems: "center",
+-                gap: 2,
+-              }}
+-            >
+-              <GithubIcon />
+-              <Typography>Войти через GitHub</Typography>
+-            </Button>
+-          </Box>
+-
+-          {isMobile ? <Divider /> : <Divider orientation="vertical" />}
+-
+-          <Box sx={{ width: "100%" }}>
+-            <Tabs
+-              value={tab}
+-              onChange={(e, v) => handleTabChange(v)}
+-              textColor="primary"
+-              indicatorColor="primary"
+-            >
+-              <Tab label="Войти" />
+-              <Tab label="Регистрация" />
+-            </Tabs>
+-
+-            <Paper
+-              elevation={3}
+-              sx={{
+-                width: "100%",
+-                borderRadius: 3,
+-                p: 0,
+-                position: "relative",
+-                borderTopLeftRadius: 0,
+-                boxShadow: "none",
+-              }}
+-            >
+-              <motion.div
+-                animate={{ height }}
+-                transition={{ duration: 0.25 }}
+-                style={{ overflow: "hidden", padding: 24 }}
+-              >
+-                <AnimatePresence mode="wait">
+-                  <motion.div
+-                    key={tab}
+-                    initial={{ opacity: 0 }}
+-                    animate={{ opacity: 1 }}
+-                    exit={{ opacity: 0 }}
+-                    transition={{ duration: 0.2 }}
+-                  >
+-                    {tab === 0 && <LoginBlock onLogin={handleLogin} />}
+-                    {tab === 1 && (
+-                      <RegistrationBlock onRegister={handleRegister} />
+-                    )}
+-                  </motion.div>
+-                </AnimatePresence>
+-              </motion.div>
+-
+-              <div
+-                ref={hiddenRef}
+-                style={{
+-                  position: "absolute",
+-                  visibility: "hidden",
+-                  pointerEvents: "none",
+-                  top: 0,
+-                }}
+-              >
+-                <div>
+-                  <LoginBlock onLogin={handleLogin} />
+-                </div>
+-                <div>
+-                  <RegistrationBlock onRegister={handleRegister} />
+-                </div>
+-              </div>
+-            </Paper>
+-          </Box>
+-        </Box>
+-      </Container>
+-      <Snackbar
+-        open={snackbar.open}
+-        autoHideDuration={4000}
+-        onClose={() => setSnackbar({ ...snackbar, open: false })}
+-        anchorOrigin={{ vertical: "top", horizontal: "center" }}
+-      >
+-        <Alert severity={snackbar.severity || "success"} sx={{ width: "100%" }}>
+-          {snackbar.message}
+-        </Alert>
+-      </Snackbar>
+-    </Box>
+-  );
+-}
+-
+-export default Authorization;
+diff --git a/frontend/src/features/auth/ui/hooks/index.ts b/frontend/src/features/auth/ui/hooks/index.ts
+deleted file mode 100644
+index ca484b6..0000000
+--- a/frontend/src/features/auth/ui/hooks/index.ts
++++ /dev/null
+@@ -1 +0,0 @@
+-export * from "./useAuth/useAuth";
+diff --git a/frontend/src/features/auth/ui/hooks/useAuth/useAuth.ts b/frontend/src/features/auth/ui/hooks/useAuth/useAuth.ts
+deleted file mode 100644
+index 11c4c26..0000000
+--- a/frontend/src/features/auth/ui/hooks/useAuth/useAuth.ts
++++ /dev/null
+@@ -1,88 +0,0 @@
+-import { useState } from "react";
+-import { useNavigate } from "react-router-dom";
+-import { useDispatch } from "react-redux";
+-import { setUser } from "../../../../../app/store/slices/authSlice";
+-import {
+-  login as loginApi,
+-  register as registerApi,
+-  sendVerificationCode,
+-} from "../../../../../entities/auth";
+-
+-export const useAuth = () => {
+-  const navigate = useNavigate();
+-  const dispatch = useDispatch();
+-  const [isLoading, setIsLoading] = useState(false);
+-
+-  const [snackbar, setSnackbar] = useState<{
+-    open: boolean;
+-    message: string;
+-    severity?: "error" | "success";
+-  }>({
+-    open: false,
+-    message: "",
+-    severity: "success",
+-  });
+-
+-  const showSnackbar = (
+-    message: string,
+-    severity: "error" | "success" = "success"
+-  ) => {
+-    setSnackbar({ open: true, message, severity });
+-    setTimeout(() => setSnackbar({ ...snackbar, open: false }), 4000); // авто-скрытие через 4 сек
+-  };
+-
+-  const handleLogin = async (email: string, password: string) => {
+-    try {
+-      setIsLoading(true);
+-      const data = await loginApi({ email, password });
+-      dispatch(
+-        setUser({
+-          userId: data.user_id,
+-          email: data.email,
+-          name: data.name,
+-          isVerified: data.is_verified,
+-          provider: data.provider,
+-          avatar: data.avatar,
+-        })
+-      );
+-      navigate("/");
+-    } catch (err: any) {
+-      console.error(err);
+-      showSnackbar(
+-        err?.response?.data?.detail || "Неверный email или пароль",
+-        "error"
+-      );
+-    } finally {
+-      setIsLoading(false);
+-    }
+-  };
+-
+-  const handleRegister = async (
+-    name: string,
+-    email: string,
+-    password: string
+-  ) => {
+-    try {
+-      setIsLoading(true);
+-      const data = await registerApi({ name, email, password });
+-
+-      if (!data.is_verified) {
+-        await sendVerificationCode(email);
+-        navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+-        showSnackbar("Проверьте почту для подтверждения аккаунта", "success");
+-      } else {
+-        navigate("/");
+-      }
+-    } catch (err: any) {
+-      console.error(err);
+-      showSnackbar(
+-        err?.response?.data?.detail || "Ошибка регистрации",
+-        "error"
+-      );
+-    } finally {
+-      setIsLoading(false);
+-    }
+-  };
+-
+-  return { handleLogin, handleRegister, isLoading, snackbar, setSnackbar };
+-};
+diff --git a/frontend/src/features/auth/ui/hooks/useTabsChange/useTabsChange.ts b/frontend/src/features/auth/ui/hooks/useTabsChange/useTabsChange.ts
+deleted file mode 100644
+index 86a9726..0000000
+--- a/frontend/src/features/auth/ui/hooks/useTabsChange/useTabsChange.ts
++++ /dev/null
+@@ -1,40 +0,0 @@
+-import { useEffect, useRef, useState } from "react";
+-import { Location } from "react-router-dom";
+-
+-export const useTabsChange = (location: Location<any>) => {
+-  const action = location.state?.action;
+-
+-  const [tab, setTab] = useState(
+-    action === "register" ? 1 : action === "login" ? 0 : 1
+-  );
+-  const [height, setHeight] = useState<number | "auto">("auto");
+-  const hiddenRef = useRef<HTMLDivElement>(null);
+-
+-  useEffect(() => {
+-    if (hiddenRef.current) {
+-      const nextContent = hiddenRef.current.children[tab] as HTMLElement;
+-      setHeight(nextContent.getBoundingClientRect().height);
+-    }
+-  }, []);
+-
+-  const handleTabChange = (newTab: number) => {
+-    if (!hiddenRef.current) {
+-      setTab(newTab);
+-      return;
+-    }
+-
+-    const nextContent = hiddenRef.current.children[newTab] as HTMLElement;
+-    const newHeight = nextContent.getBoundingClientRect().height;
+-
+-    setHeight(newHeight);
+-
+-    setTimeout(() => setTab(newTab), 0);
+-  };
+-
+-  return {
+-    tab,
+-    handleTabChange,
+-    height,
+-    hiddenRef,
+-  };
+-};
+diff --git a/frontend/src/features/auth/ui/index.ts b/frontend/src/features/auth/ui/index.ts
+deleted file mode 100644
+index ac3d2a2..0000000
+--- a/frontend/src/features/auth/ui/index.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-import Authorization from "./Authorization";
+-
+-export default Authorization;
+diff --git a/frontend/src/features/navigation/ui/AppRouter.tsx b/frontend/src/features/navigation/ui/AppRouter.tsx
+index f5d222d..0569367 100644
+--- a/frontend/src/features/navigation/ui/AppRouter.tsx
++++ b/frontend/src/features/navigation/ui/AppRouter.tsx
+@@ -8,11 +8,8 @@ import GeneratePage from "../../../pages/GeneratePage/GeneratePage";
+ import { Header } from "../../../widgets/Header";
+ import { Box, useMediaQuery, useTheme } from "@mui/material";
+ import { Footer } from "../../../widgets/Footer/ui/Footer";
+-import { AuthPage, SettingsPage } from "../../../pages";
+-import VerificationPage from "../../../pages/VerificationPage/VerificationPage";
+ import ProtectedRoute from "./components/ProtectedRoute";
+ import MyPresentationsPage from "../../../pages/MyPresentationsPage/MyPresentationsPage";
+-import OAuthSuccess from "../../../shared/components/OAuthSuccess";
+ 
+ const PageWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+   <motion.div
+@@ -29,8 +26,7 @@ const PageWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+ const AnimatedRoutes = () => {
+   const location = useLocation();
+   const isMobile = useMediaQuery(useTheme().breakpoints.down("md"));
+-  const hideFooter =
+-    location.pathname === "/projects" || location.pathname === "/settings";
++  const hideFooter = location.pathname === "/projects";
+ 
+   return (
+     <>
+@@ -76,35 +72,6 @@ const AnimatedRoutes = () => {
+               </ProtectedRoute>
+             }
+           />
+-          <Route
+-            path="/settings"
+-            element={
+-              <ProtectedRoute>
+-                <PageWrapper>
+-                  <SettingsPage />
+-                </PageWrapper>
+-              </ProtectedRoute>
+-            }
+-          />
+-          <Route
+-            path="/auth"
+-            element={
+-              <PageWrapper>
+-                <AuthPage />
+-              </PageWrapper>
+-            }
+-          />
+-          <Route
+-            path="/verify-email"
+-            element={
+-              <PageWrapper>
+-                <VerificationPage />
+-              </PageWrapper>
+-            }
+-          />
+-
+-          {/* Отдельный роут для успешного aouth */}
+-          <Route path="/auth/success" element={<OAuthSuccess />} />
+         </Routes>
+         {!hideFooter && (
+           <Box sx={{ height: isMobile ? 64 : 120, flexShrink: 0 }}>
+diff --git a/frontend/src/features/navigation/ui/components/ProtectedRoute/ProtectedRoute.tsx b/frontend/src/features/navigation/ui/components/ProtectedRoute/ProtectedRoute.tsx
+index e023828..3a56561 100644
+--- a/frontend/src/features/navigation/ui/components/ProtectedRoute/ProtectedRoute.tsx
++++ b/frontend/src/features/navigation/ui/components/ProtectedRoute/ProtectedRoute.tsx
+@@ -1,21 +1,11 @@
+ import React from "react";
+-import { Navigate } from "react-router-dom";
+-import { useSelector } from "react-redux";
+-import { RootState } from "../../../../../app/store";
+-import { useAuthCheck } from "../../../../../shared/hooks";
+-import { LoadingOverlay } from "../../../../../shared/components";
+ 
+ interface ProtectedRouteProps {
+   children: React.ReactNode;
+ }
+ 
+ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
+-  const auth = useSelector((state: RootState) => state.auth);
+-
+-  useAuthCheck();
+-
+-  if (!auth.isChecked) return <LoadingOverlay title="Подождите" />;
+-  if (!auth.isLoggedIn) return <Navigate to="/auth" replace />;
+-
+   return <>{children}</>;
+ };
++
++export default ProtectedRoute;
+diff --git a/frontend/src/pages/AuthPage/AuthPage.tsx b/frontend/src/pages/AuthPage/AuthPage.tsx
+deleted file mode 100644
+index 8197bff..0000000
+--- a/frontend/src/pages/AuthPage/AuthPage.tsx
++++ /dev/null
+@@ -1,13 +0,0 @@
+-import { Box } from "@mui/material";
+-import React from "react";
+-import Authorization from "../../features/auth/ui";
+-
+-function AuthPage() {
+-  return (
+-    <Box>
+-      <Authorization />
+-    </Box>
+-  );
+-}
+-
+-export default AuthPage;
+diff --git a/frontend/src/pages/VerificationPage/VerificationPage.tsx b/frontend/src/pages/VerificationPage/VerificationPage.tsx
+deleted file mode 100644
+index 31e3e9b..0000000
+--- a/frontend/src/pages/VerificationPage/VerificationPage.tsx
++++ /dev/null
+@@ -1,21 +0,0 @@
+-import React, { useState } from "react";
+-import VerificationBlock from "../../features/auth/blocks/components/VerificationBlock";
+-import { Box, useMediaQuery, useTheme } from "@mui/material";
+-
+-function VerificationPage() {
+-  const isMobile = useMediaQuery(useTheme().breakpoints.down("md"));
+-  return (
+-    <Box
+-      sx={{
+-        height: isMobile ? undefined : "95vh",
+-        display: "flex",
+-        justifyContent: "center",
+-        alignItems: isMobile ? undefined : "center",
+-      }}
+-    >
+-      <VerificationBlock />
+-    </Box>
+-  );
+-}
+-
+-export default VerificationPage;
+diff --git a/frontend/src/pages/index.ts b/frontend/src/pages/index.ts
+index b85e62e..311f47f 100644
+--- a/frontend/src/pages/index.ts
++++ b/frontend/src/pages/index.ts
+@@ -1,7 +1,6 @@
+ import EditorPage from "./EditorPage/EditorPage";
+ import PromptPage from "./PromptPage/PromptPage";
+ import GeneratePage from "./GeneratePage/GeneratePage";
+-import AuthPage from "./AuthPage/AuthPage";
+ import SettingsPage from "./SettingsPage/SettingsPage"
+ 
+-export { EditorPage, PromptPage, GeneratePage, AuthPage, SettingsPage };
++export { EditorPage, PromptPage, GeneratePage, SettingsPage };
+diff --git a/frontend/src/shared/components/OAuthSuccess/OAuthSuccess.tsx b/frontend/src/shared/components/OAuthSuccess/OAuthSuccess.tsx
+deleted file mode 100644
+index ecea770..0000000
+--- a/frontend/src/shared/components/OAuthSuccess/OAuthSuccess.tsx
++++ /dev/null
+@@ -1,23 +0,0 @@
+-import { useEffect } from "react";
+-import { useNavigate } from "react-router-dom";
+-
+-export default function OAuthSuccess() {
+-  const navigate = useNavigate();
+-
+-  useEffect(() => {
+-    fetch("/auth/me", {
+-      method: "GET",
+-      credentials: "include",
+-    })
+-      .then((res) => res.json())
+-      .then((user) => {
+-        console.log("Авторизованный пользователь:", user);
+-        navigate("/dashboard");
+-      })
+-      .catch(() => {
+-        navigate("/login");
+-      });
+-  }, [navigate]);
+-
+-  return <div>Авторизация успешна. Идёт перенаправление...</div>;
+-}
+diff --git a/frontend/src/shared/components/OAuthSuccess/index.ts b/frontend/src/shared/components/OAuthSuccess/index.ts
+deleted file mode 100644
+index 7c06a69..0000000
+--- a/frontend/src/shared/components/OAuthSuccess/index.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-import OAuthSuccess from "./OAuthSuccess";
+-
+-export default OAuthSuccess;
+diff --git a/frontend/src/shared/components/index.ts b/frontend/src/shared/components/index.ts
+index 8003337..ab6cc32 100644
+--- a/frontend/src/shared/components/index.ts
++++ b/frontend/src/shared/components/index.ts
+@@ -1,2 +1 @@
+ export * from "./LoadingOverlay/LoadingOverlay";
+-export * from "./OAuthSuccess/OAuthSuccess";
+diff --git a/frontend/src/shared/hooks/index.ts b/frontend/src/shared/hooks/index.ts
+index 7d6860d..fe280bc 100644
+--- a/frontend/src/shared/hooks/index.ts
++++ b/frontend/src/shared/hooks/index.ts
+@@ -1,3 +1,2 @@
+ export * from "./useGeneration/useGeneration";
+-export * from "./useAuthCheck/useAuthCheck";
+-export * from "./useSavePresentation/useSavePresentation"
+\ No newline at end of file
++export * from "./useSavePresentation/useSavePresentation"
+diff --git a/frontend/src/shared/hooks/useAuthCheck/useAuthCheck.ts b/frontend/src/shared/hooks/useAuthCheck/useAuthCheck.ts
+deleted file mode 100644
+index 607f539..0000000
+--- a/frontend/src/shared/hooks/useAuthCheck/useAuthCheck.ts
++++ /dev/null
+@@ -1,36 +0,0 @@
+-import { useEffect } from "react";
+-import { useDispatch } from "react-redux";
+-import {
+-  setUser,
+-  logout,
+-  setChecked,
+-} from "../../../app/store/slices/authSlice";
+-import { me } from "../../../entities/auth";
+-
+-export const useAuthCheck = () => {
+-  const dispatch = useDispatch();
+-
+-  useEffect(() => {
+-    const checkAuth = async () => {
+-      try {
+-        const data = await me();
+-        dispatch(
+-          setUser({
+-            userId: data.user_id,
+-            email: data.email,
+-            name: data.name,
+-            isVerified: data.is_verified,
+-            provider: data.provider,
+-            avatar: data.avatar,
+-          })
+-        );
+-      } catch {
+-        dispatch(logout());
+-      } finally {
+-        dispatch(setChecked({ isChecked: true }));
+-      }
+-    };
+-
+-    checkAuth();
+-  }, [dispatch]);
+-};
+diff --git a/frontend/src/widgets/Footer/blocks/components/GithubButton/GithubButton.tsx b/frontend/src/widgets/Footer/blocks/components/GithubButton/GithubButton.tsx
+deleted file mode 100644
+index c739544..0000000
+--- a/frontend/src/widgets/Footer/blocks/components/GithubButton/GithubButton.tsx
++++ /dev/null
+@@ -1,60 +0,0 @@
+-import React from "react";
+-import { Button, Box, Divider } from "@mui/material";
+-import GitHubIcon from "@mui/icons-material/GitHub";
+-import StarIcon from "@mui/icons-material/Star";
+-import { useGithubStars } from "../../hooks";
+-
+-export const GithubButton = ({ isMobile }: { isMobile: boolean }) => {
+-  const { stars } = useGithubStars();
+-
+-  return (
+-    <Button
+-      component="a"
+-      href="https://github.com/aklyue/AIFixed"
+-      target="_blank"
+-      rel="noopener noreferrer"
+-      variant="outlined"
+-      fullWidth={isMobile}
+-      sx={{
+-        minWidth: 180,
+-        height: 50,
+-        textTransform: "none",
+-        borderRadius: 2,
+-        px: 2,
+-        display: "flex",
+-        alignItems: "center",
+-        justifyContent: "space-between",
+-        position: "relative",
+-      }}
+-    >
+-      <Box
+-        sx={{
+-          display: "flex",
+-          alignItems: "center",
+-          gap: 1,
+-          justifyContent: isMobile ? "center" : "flex-start",
+-          flex: 1,
+-        }}
+-      >
+-        <GitHubIcon />
+-        GitHub
+-      </Box>
+-
+-      {!isMobile && <Divider orientation="vertical" flexItem />}
+-
+-      <Box
+-        sx={{
+-          display: "flex",
+-          alignItems: "center",
+-          gap: 0.5,
+-          position: isMobile ? "absolute" : "static",
+-          right: isMobile ? 16 : "auto",
+-          pl: 1,
+-        }}
+-      >
+-        <StarIcon fontSize="small" />
+-        {stars !== null ? stars : "..."}
+-      </Box>
+-    </Button>
+-  );
+-};
+diff --git a/frontend/src/widgets/Footer/blocks/components/GithubButton/index.ts b/frontend/src/widgets/Footer/blocks/components/GithubButton/index.ts
+deleted file mode 100644
+index fd52b91..0000000
+--- a/frontend/src/widgets/Footer/blocks/components/GithubButton/index.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-import { GithubButton } from "./GithubButton";
+-
+-export default GithubButton;
+diff --git a/frontend/src/widgets/Footer/blocks/hooks/index.ts b/frontend/src/widgets/Footer/blocks/hooks/index.ts
+index e735bb6..7bde99c 100644
+--- a/frontend/src/widgets/Footer/blocks/hooks/index.ts
++++ b/frontend/src/widgets/Footer/blocks/hooks/index.ts
+@@ -1 +1,2 @@
+-export * from "./useGithubStars/useGithubStars";
++// GitHub stars hooks removed in cleanup.
++export {};
+diff --git a/frontend/src/widgets/Footer/blocks/hooks/useGithubStars/useGithubStars.ts b/frontend/src/widgets/Footer/blocks/hooks/useGithubStars/useGithubStars.ts
+deleted file mode 100644
+index 5f85028..0000000
+--- a/frontend/src/widgets/Footer/blocks/hooks/useGithubStars/useGithubStars.ts
++++ /dev/null
+@@ -1,20 +0,0 @@
+-import { useEffect, useState } from "react";
+-import { getGithubStars } from "../../../../../entities";
+-
+-export function useGithubStars() {
+-  const [stars, setStars] = useState<number | null>(null);
+-
+-  useEffect(() => {
+-    let mounted = true;
+-
+-    getGithubStars().then((value) => {
+-      if (mounted) setStars(value);
+-    });
+-
+-    return () => {
+-      mounted = false;
+-    };
+-  }, []);
+-
+-  return { stars };
+-}
+diff --git a/frontend/src/widgets/Footer/blocks/index.ts b/frontend/src/widgets/Footer/blocks/index.ts
+index 0bea0a9..5141c8a 100644
+--- a/frontend/src/widgets/Footer/blocks/index.ts
++++ b/frontend/src/widgets/Footer/blocks/index.ts
+@@ -1 +1,2 @@
+-export * from "./components/GithubButton";
+\ No newline at end of file
++// GitHub footer block removed in cleanup.
++export {};
+diff --git a/frontend/src/widgets/Footer/ui/Footer.tsx b/frontend/src/widgets/Footer/ui/Footer.tsx
+index 2776a60..23e9e6f 100644
+--- a/frontend/src/widgets/Footer/ui/Footer.tsx
++++ b/frontend/src/widgets/Footer/ui/Footer.tsx
+@@ -4,8 +4,6 @@ import { ReactComponent as LogoPC } from "../../../shared/assets/logo/logo-pc.sv
+ import { ReactComponent as LogoPhone } from "../../../shared/assets/logo/logo-phone.svg";
+ 
+ import LanguageIcon from "@mui/icons-material/Language";
+-import TelegramIcon from "@mui/icons-material/Telegram";
+-import GithubButton from "../blocks/components/GithubButton";
+ import { useLocation } from "react-router-dom";
+ import { useSelector } from "react-redux";
+ import { RootState } from "../../../app/store";
+@@ -56,27 +54,6 @@ export const Footer: React.FC = () => {
+           boxSizing: "border-box",
+         }}
+       >
+-        <GithubButton isMobile={isMobile} />
+-
+-        <Button
+-          component="a"
+-          href="https://t.me/yukino_r"
+-          target="_blank"
+-          rel="noopener noreferrer"
+-          variant="outlined"
+-          fullWidth={isMobile}
+-          sx={{
+-            minWidth: 180,
+-            height: 50,
+-            textTransform: "none",
+-            borderRadius: 2,
+-            gap: 1,
+-          }}
+-        >
+-          <TelegramIcon />
+-          Telegram
+-        </Button>
+-
+         <Button
+           component="a"
+           href="https://aifixed.onrender.com"
+diff --git a/frontend/src/widgets/Header/blocks/components/HeaderAuthBlock/HeaderAuthBlock.tsx b/frontend/src/widgets/Header/blocks/components/HeaderAuthBlock/HeaderAuthBlock.tsx
+deleted file mode 100644
+index ff1a8bc..0000000
+--- a/frontend/src/widgets/Header/blocks/components/HeaderAuthBlock/HeaderAuthBlock.tsx
++++ /dev/null
+@@ -1,114 +0,0 @@
+-import React, { useState } from "react";
+-import { Box, Button, Typography, Avatar, Menu, MenuItem } from "@mui/material";
+-import { useNavigate } from "react-router-dom";
+-import { logout } from "../../../../../app/store/slices/authSlice";
+-import { useDispatch, useSelector } from "react-redux";
+-import { RootState } from "../../../../../app/store";
+-import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
+-
+-const HeaderAuthBlock: React.FC<{ isMobile?: boolean }> = ({ isMobile }) => {
+-  const navigate = useNavigate();
+-  const dispatch = useDispatch();
+-  const auth = useSelector((state: RootState) => state.auth);
+-
+-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+-  const open = Boolean(anchorEl);
+-
+-  const handleClick = (event: React.MouseEvent<HTMLElement>) => {
+-    setAnchorEl(event.currentTarget);
+-  };
+-
+-  const handleClose = () => {
+-    setAnchorEl(null);
+-  };
+-
+-  const handleLogout = async () => {
+-    handleClose();
+-
+-    try {
+-      await fetch(`${process.env.REACT_APP_API_URL}/auth/logout`, {
+-        method: "POST",
+-        credentials: "include",
+-      });
+-    } catch (err) {
+-      console.error("Logout error:", err);
+-    } finally {
+-      dispatch(logout());
+-      navigate("/auth");
+-    }
+-
+-    dispatch(logout());
+-    navigate("/");
+-  };
+-
+-  if (auth.isLoggedIn) {
+-    return (
+-      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+-        <Button
+-          onClick={handleClick}
+-          sx={{
+-            textTransform: "none",
+-            display: "flex",
+-            alignItems: "center",
+-            gap: 1,
+-          }}
+-        >
+-          <Avatar sx={{ width: 35, height: 35 }} src={auth.avatar}>
+-            {!auth.avatar && auth.name ? auth.name[0].toUpperCase() : null}
+-          </Avatar>
+-          <Typography>{auth.name || auth.email}</Typography>
+-          <ArrowDropDownIcon />
+-        </Button>
+-
+-        <Menu anchorEl={anchorEl} open={open} onClose={handleClose}>
+-          <MenuItem
+-            onClick={() => {
+-              navigate("/projects");
+-              handleClose();
+-            }}
+-          >
+-            Мои презентации
+-          </MenuItem>
+-          <MenuItem
+-            onClick={() => {
+-              navigate("/settings");
+-              handleClose();
+-            }}
+-          >
+-            Настройки
+-          </MenuItem>
+-          <MenuItem
+-            onClick={handleLogout}
+-            sx={{
+-              color: "rgba(255, 0, 0, 1)",
+-            }}
+-          >
+-            Выйти
+-          </MenuItem>
+-        </Menu>
+-      </Box>
+-    );
+-  }
+-
+-  return (
+-    <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+-      <Button
+-        variant="contained"
+-        sx={{ textTransform: "none" }}
+-        onClick={() => navigate("/auth", { state: { action: "login" } })}
+-      >
+-        {isMobile ? "Вход" : "Войти"}
+-      </Button>
+-      {!isMobile && <Typography>или</Typography>}
+-      <Button
+-        variant="outlined"
+-        sx={{ textTransform: "none" }}
+-        onClick={() => navigate("/auth", { state: { action: "register" } })}
+-      >
+-        {isMobile ? "Регистрация" : "Зарегистрироваться"}
+-      </Button>
+-    </Box>
+-  );
+-};
+-
+-export default HeaderAuthBlock;
+diff --git a/frontend/src/widgets/Header/blocks/components/HeaderAuthBlock/index.ts b/frontend/src/widgets/Header/blocks/components/HeaderAuthBlock/index.ts
+deleted file mode 100644
+index 62cd0e1..0000000
+--- a/frontend/src/widgets/Header/blocks/components/HeaderAuthBlock/index.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-import HeaderAuthBlock from "./HeaderAuthBlock";
+-
+-export default HeaderAuthBlock;
+diff --git a/frontend/src/widgets/Header/ui/Header.tsx b/frontend/src/widgets/Header/ui/Header.tsx
+index 6489aa2..60c40ab 100644
+--- a/frontend/src/widgets/Header/ui/Header.tsx
++++ b/frontend/src/widgets/Header/ui/Header.tsx
+@@ -14,9 +14,6 @@ import { useNavigate } from "react-router-dom";
+ import { motion } from "framer-motion";
+ import SlideNavigationToolbar from "../../../features/presentation/ui/components/SlideNavigationToolbar";
+ import { useHeader } from "../hooks";
+-import { useSelector } from "react-redux";
+-import { RootState } from "../../../app/store";
+-import HeaderAuthBlock from "../blocks/components/HeaderAuthBlock";
+ 
+ const MotionAppBar = motion(AppBar);
+ 
+@@ -28,8 +25,6 @@ export const Header: React.FC = () => {
+ 
+   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+ 
+-  const auth = useSelector((state: RootState) => state.auth);
+-
+   return (
+     <MotionAppBar
+       position="fixed"
+@@ -80,8 +75,14 @@ export const Header: React.FC = () => {
+         </Box>
+         {location.pathname === "/editor" && <SlideNavigationToolbar />}
+ 
+-        {location.pathname === "/" && auth.isChecked && (
+-          <HeaderAuthBlock isMobile={isMobile} />
++        {location.pathname === "/" && (
++          <Button
++            variant="contained"
++            sx={{ textTransform: "none" }}
++            onClick={() => navigate("/projects")}
++          >
++            Мои презентации
++          </Button>
+         )}
+       </Toolbar>
+     </MotionAppBar>
+diff --git a/scripts/practical_checklist.sh b/scripts/practical_checklist.sh
+new file mode 100755
+index 0000000..8203676
+--- /dev/null
++++ b/scripts/practical_checklist.sh
+@@ -0,0 +1,69 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++cd "$ROOT_DIR"
++
++echo "[1/7] Backend .env"
++if [[ ! -f backend/.env ]]; then
++  cp backend/.env.example backend/.env
++  echo "  backend/.env was created from example"
++else
++  echo "  backend/.env already exists"
++fi
++
++echo "[2/7] Force USE_DATABASE=true"
++if rg -q '^USE_DATABASE=' backend/.env; then
++  sed -i 's/^USE_DATABASE=.*/USE_DATABASE=true/' backend/.env
++else
++  echo 'USE_DATABASE=true' >> backend/.env
++fi
++
++echo "[3/7] Start/check Postgres"
++docker compose up -d postgres
++sleep 4
++docker compose ps postgres
++
++echo "[4/7] Check ML dependencies"
++python - <<'PY'
++import importlib
++mods=['torch','sentence_transformers','transformers']
++missing=[]
++for m in mods:
++    try:
++        importlib.import_module(m)
++    except Exception:
++        missing.append(m)
++if missing:
++    raise SystemExit('Missing: ' + ', '.join(missing))
++print('ML dependencies are installed')
++PY
++
++echo "[5/7] Frontend .env"
++if [[ ! -f frontend/.env ]]; then
++  cp frontend/.env.example frontend/.env
++fi
++if rg -q '^REACT_APP_API_URL=' frontend/.env; then
++  sed -i 's|^REACT_APP_API_URL=.*|REACT_APP_API_URL=http://localhost:8000/api|' frontend/.env
++else
++  echo 'REACT_APP_API_URL=http://localhost:8000/api' >> frontend/.env
++fi
++
++echo "[6/7] Start backend + frontend"
++docker compose up -d backend frontend
++
++echo "[7/7] Scenario checks"
++curl -sS -X POST 'http://localhost:8000/api/auth/login' \
++  -H 'Content-Type: application/json' \
++  -d '{"email":"guest@example.com","password":"guest"}' | tee /tmp/login.json
++
++python - <<'PY'
++from pathlib import Path
++import json
++payload=json.loads(Path('/tmp/login.json').read_text())
++print('login response keys:', sorted(payload.keys()))
++PY
++
++echo "Open UI: http://localhost:3000"
++echo "Generate page: http://localhost:3000/generate"
++echo "Editor page: http://localhost:3000/editor"

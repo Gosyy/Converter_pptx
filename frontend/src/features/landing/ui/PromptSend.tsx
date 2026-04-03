@@ -2,13 +2,16 @@ import React from "react";
 import UploadFileIcon from "@mui/icons-material/AddCircle";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import PersonOutlineRoundedIcon from "@mui/icons-material/PersonOutlineRounded";
 import {
   Alert,
   Box,
   Button,
+  FormControlLabel,
   MenuItem,
   Select,
   Snackbar,
+  Switch,
   TextField,
   Typography,
   useMediaQuery,
@@ -17,6 +20,9 @@ import {
 import { useGeneration } from "../../../shared/hooks";
 import { useNavigate } from "react-router-dom";
 import { LoadingOverlay } from "../../../shared/components";
+import { useDispatch, useSelector } from "react-redux";
+import { AppDispatch, RootState } from "../../../app/store";
+import { setUseDatabase } from "../../../app/store/slices/uiSlice";
 
 export const PromptSend: React.FC = () => {
   const {
@@ -31,16 +37,38 @@ export const PromptSend: React.FC = () => {
     setError,
     model,
     setModel,
+    progressEvents,
   } = useGeneration();
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  const dispatch = useDispatch<AppDispatch>();
+  const useDatabase = useSelector((s: RootState) => s.ui.useDatabase);
 
+  const [guestMsg, setGuestMsg] = React.useState<string | null>(null);
+  const [preset, setPreset] = React.useState<"strict" | "report">("strict");
   const navigate = useNavigate();
 
   const onSubmit = async (e: React.FormEvent) => {
-    const success = handleSubmit(e);
+    await handleSubmit(e);
     navigate("/generate");
+  };
+
+  const loginAsGuest = async () => {
+    try {
+      const resp = await fetch(`${process.env.REACT_APP_API_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "guest@example.com", password: "guest", guest: true }),
+      });
+      if (!resp.ok) {
+        throw new Error("guest_login_failed");
+      }
+      localStorage.setItem("guest_mode", "enabled");
+      setGuestMsg("Гостевой режим включён");
+    } catch {
+      setGuestMsg("Не удалось включить гостевой режим");
+    }
   };
 
   if (loading) return <LoadingOverlay />;
@@ -95,6 +123,52 @@ export const PromptSend: React.FC = () => {
           width: "100%",
         }}
       >
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: 1,
+            transition: "all .25s ease",
+          }}
+        >
+          <Button
+            variant="text"
+            startIcon={<PersonOutlineRoundedIcon />}
+            onClick={loginAsGuest}
+            sx={{ textTransform: "none" }}
+          >
+            Войти как гость
+          </Button>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={useDatabase}
+                onChange={(e) => dispatch(setUseDatabase(e.target.checked))}
+                color="primary"
+                sx={{
+                  "& .MuiSwitch-switchBase": {
+                    transitionDuration: "250ms",
+                  },
+                }}
+              />
+            }
+            label={
+              useDatabase
+                ? "Сохранять в БД: включено"
+                : "Сохранять в БД: отключено"
+            }
+            sx={{
+              mr: 0,
+              "& .MuiFormControlLabel-label": {
+                fontSize: 14,
+                color: "text.secondary",
+                transition: "color .25s ease",
+              },
+            }}
+          />
+        </Box>
+
         <TextField
           fullWidth
           multiline
@@ -204,9 +278,41 @@ export const PromptSend: React.FC = () => {
                 },
               }}
             >
-              <MenuItem value="google/gemma-3-12b-it">gemma-3-12b-it</MenuItem>
-              <MenuItem value="moonshotai/kimi-k2-0905">kimi-k2-0905</MenuItem>
-              <MenuItem value="openai/gpt-oss-120b">gpt-oss-120b</MenuItem>
+              <MenuItem value="GigaChat-2">GigaChat 2.0</MenuItem>
+            </Select>
+
+            <Select
+              value={preset}
+              onChange={(e) => setPreset(e.target.value as "strict" | "report")}
+              title={
+                preset === "strict"
+                  ? "Строгий: шаблонный фон, графики, таблицы, списки, текст"
+                  : "Доклад: всё из строгого + изображения"
+              }
+              sx={{
+                height: 40,
+                ml: 2,
+                maxWidth: isMobile ? "100%" : 260,
+                borderRadius: "8px",
+                color: "text.primary",
+                bgcolor: "background.paper",
+                border: `1px solid ${theme.palette.primary.main}`,
+                fontSize: 14,
+                "& .MuiOutlinedInput-notchedOutline": { border: "none" },
+              }}
+            >
+              <MenuItem
+                value="strict"
+                title="Шаблонный фон, графики, таблицы, списки, текст"
+              >
+                KPI preset: Строгий
+              </MenuItem>
+              <MenuItem
+                value="report"
+                title="Шаблонный фон, графики, таблицы, списки, текст + изображения"
+              >
+                KPI preset: Доклад
+              </MenuItem>
             </Select>
           </Box>
 
@@ -229,6 +335,19 @@ export const PromptSend: React.FC = () => {
         </Box>
       </form>
 
+      {progressEvents.length > 0 && (
+        <Box sx={{ mt: 2, width: "100%", maxWidth: isMobile ? "100%" : "1000px" }}>
+          <Typography variant="subtitle2" sx={{ mb: 1, color: "text.secondary" }}>
+            Прогресс генерации:
+          </Typography>
+          {progressEvents.map((event, idx) => (
+            <Typography key={`${event}-${idx}`} variant="caption" display="block">
+              • {event}
+            </Typography>
+          ))}
+        </Box>
+      )}
+
       <Snackbar
         open={!!error}
         autoHideDuration={5000}
@@ -247,6 +366,21 @@ export const PromptSend: React.FC = () => {
           }}
         >
           {error}
+        </Alert>
+      </Snackbar>
+
+      <Snackbar
+        open={!!guestMsg}
+        autoHideDuration={3000}
+        onClose={() => setGuestMsg(null)}
+        anchorOrigin={{ vertical: "top", horizontal: "center" }}
+      >
+        <Alert
+          onClose={() => setGuestMsg(null)}
+          severity={guestMsg?.includes("Не удалось") ? "warning" : "success"}
+          sx={{ width: "100%" }}
+        >
+          {guestMsg}
         </Alert>
       </Snackbar>
     </Box>

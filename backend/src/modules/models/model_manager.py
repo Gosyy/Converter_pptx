@@ -13,8 +13,7 @@ os.environ["HF_DATASETS_CACHE"] = os.path.join(CACHE_DIR, "datasets")
 
 
 from typing import Optional
-from sentence_transformers import SentenceTransformer, CrossEncoder
-import torch
+from typing import Any
 
 from src.config import settings
 
@@ -26,8 +25,8 @@ class ModelManager:
     """
 
     _instance: Optional["ModelManager"] = None
-    _embedding_model: Optional[SentenceTransformer] = None
-    _cross_encoder_model: Optional[CrossEncoder] = None
+    _embedding_model: Optional[Any] = None
+    _cross_encoder_model: Optional[Any] = None
     _initialized: bool = False
 
     def __new__(cls) -> "ModelManager":
@@ -40,11 +39,14 @@ class ModelManager:
             self._initialized = True
             logging.info("ModelManager initialized")
 
-    def get_embedding_model(self, model_name: str = None) -> SentenceTransformer:
+    def get_embedding_model(self, model_name: str = None):
         if self._embedding_model is None:
             model_name = model_name or settings.DEFAULT_EMBEDDING_MODEL
             logging.info(f"Loading embedding model: {model_name}")
             try:
+                import torch
+                from sentence_transformers import SentenceTransformer
+
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 self._embedding_model = SentenceTransformer(model_name, device=device, cache_folder=CACHE_DIR)
                 _ = self._embedding_model.encode(["warmup"], normalize_embeddings=False)
@@ -54,11 +56,13 @@ class ModelManager:
                 raise
         return self._embedding_model
 
-    def get_cross_encoder_model(self, model_name: str = None) -> CrossEncoder:
+    def get_cross_encoder_model(self, model_name: str = None):
         if self._cross_encoder_model is None:
             model_name = model_name or settings.CROSS_ENCODER_MODEL
             logging.info(f"Loading cross encoder model: {model_name}")
             try:
+                from sentence_transformers import CrossEncoder
+
                 self._cross_encoder_model = CrossEncoder(model_name)
                 _ = self._cross_encoder_model.predict([("warmup", "warmup")])
                 logging.info(f"✓ Cross encoder model {model_name} ready")
