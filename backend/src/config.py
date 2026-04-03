@@ -14,6 +14,11 @@ class _Settings(BaseSettings):
     GIGACHAT_SCOPE: str = "GIGACHAT_API_PERS"
     GIGACHAT_VERIFY_SSL: bool = True
 
+    # External secret manager (optional)
+    SECRET_MANAGER_URL: str = ""
+    SECRET_MANAGER_TOKEN: str = ""
+    SECRET_MANAGER_TIMEOUT: int = 5
+
     # Основные модели
     DEFAULT_MODEL: str = "GigaChat-2-Pro"
     DEFAULT_EMBEDDING_MODEL: str = "openai/gpt-oss-120b"
