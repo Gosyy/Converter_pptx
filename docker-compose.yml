@@ -15,58 +15,60 @@ services:
       - frontend
     networks:
       - app-network
+
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        NODE_ENV: "production"
-    image: converter_pptx_frontend:latest
-    ports:
-      - "8080:80" # хост:контейнер (nginx внутри контейнера слушает 80)
-    networks:
-      - app-network
+    environment:
+      NODE_ENV: production
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - app-network
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
       args:
         PRELOAD_MODEL_CACHE: "true"
+    command: uvicorn src.main:app --host 0.0.0.0 --port ${BACKEND_INTERNAL_PORT:-8000}
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-converter}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      FEATURE_RUST_SIDECAR: ${FEATURE_RUST_SIDECAR:-false}
+      FEATURE_KANDINSKY: ${FEATURE_KANDINSKY:-false}
+      FEATURE_PROGRESS_WS: ${FEATURE_PROGRESS_WS:-true}
+      RUST_SIDECAR_URL: ${RUST_SIDECAR_URL:-http://rust-sidecar:7001}
+      FRONT_URL: ${FRONT_URL:-http://localhost:${FRONTEND_PORT:-3000}}
+      DOMAIN: ${DOMAIN:-http://localhost:${FRONTEND_PORT:-3000}}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:${FRONTEND_PORT:-3000}}
     volumes:
       - ./backend:/code
       - model_cache:/models_cache
-    networks:
-      - app-network
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
-    command: uvicorn src.main:app --host 0.0.0.0 --port ${BACKEND_INTERNAL_PORT:-8000}
-    environment:
-      - ENVIRONMENT=production
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-converter}
-      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
-      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
-      - FEATURE_RUST_SIDECAR=${FEATURE_RUST_SIDECAR:-false}
-      - FEATURE_KANDINSKY=${FEATURE_KANDINSKY:-false}
-      - FEATURE_PROGRESS_WS=${FEATURE_PROGRESS_WS:-true}
-      - RUST_SIDECAR_URL=${RUST_SIDECAR_URL:-http://rust-sidecar:7001}
-      - FRONT_URL=${FRONT_URL:-http://localhost:${FRONTEND_PORT:-3000}}
-      - DOMAIN=${DOMAIN:-http://localhost:${FRONTEND_PORT:-3000}}
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:${FRONTEND_PORT:-3000}}
+    networks:
+      - app-network
 
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-converter}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-converter}
     volumes:
       - postgres_prod_data:/var/lib/postgresql/data
     ports:
@@ -84,10 +86,10 @@ services:
       context: ./rust_sidecar
       dockerfile: Dockerfile
     profiles: ["rust"]
-    networks:
-      - app-network
     ports:
       - "${RUST_SIDECAR_PORT:-7001}:7001"
+    networks:
+      - app-network
 
 volumes:
   postgres_prod_data:
