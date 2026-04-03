@@ -106,7 +106,7 @@ upsert_env backend/.env SECRET_MANAGER_URL ""
 upsert_env backend/.env SECRET_MANAGER_TOKEN ""
 upsert_env backend/.env SECRET_MANAGER_TIMEOUT 5
 
-upsert_env frontend/.env REACT_APP_API_URL http://localhost:8000/api
+upsert_env frontend/.env REACT_APP_API_URL /api
 
 if ! rg -q '^GIGACHAT_AUTH_KEY=' backend/.env; then
   echo 'GIGACHAT_AUTH_KEY=put_real_gigachat_key_here' >> backend/.env

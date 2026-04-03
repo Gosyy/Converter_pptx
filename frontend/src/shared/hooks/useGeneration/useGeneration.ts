@@ -142,6 +142,9 @@ interface ChatMessage {
   file?: File | null;
 }
 
+const getApiBaseUrl = (): string =>
+  (process.env.REACT_APP_API_URL || "/api").replace(/\/$/, "");
+
 export const useGeneration = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState("");
@@ -152,6 +155,7 @@ export const useGeneration = () => {
   const dispatch = useDispatch<AppDispatch>();
 
   const wsRef = useRef<WebSocket | null>(null);
+  const hasLoggedApiBaseRef = useRef(false);
 
   const { file, text, loading } = useSelector(
     (state: RootState) => state.prompt
@@ -162,6 +166,16 @@ export const useGeneration = () => {
     converted: boolean;
   } | null>(null);
   const [progressEvents, setProgressEvents] = useState<string[]>([]);
+
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" || hasLoggedApiBaseRef.current) {
+      return;
+    }
+    hasLoggedApiBaseRef.current = true;
+    // eslint-disable-next-line no-console
+    console.info(`[network] getApiBaseUrl() => ${getApiBaseUrl()}`);
+  }, []);
 
   useEffect(() => {
     const aiMsg: ChatMessage = {
@@ -206,10 +220,13 @@ export const useGeneration = () => {
       setProgressEvents([]);
 
       const clientId = crypto.randomUUID();
-      const wsUrl = process.env.REACT_APP_API_URL
-        ?.replace(/^http/, "ws")
-        .replace(/\/api$/, `/api/presentation/progress/ws/${clientId}`);
-      const progressWs = wsUrl ? new WebSocket(wsUrl) : null;
+      const apiBase = getApiBaseUrl();
+      const wsUrl = apiBase.startsWith("http")
+        ? apiBase
+            .replace(/^http/, "ws")
+            .replace(/\/api$/, `/api/presentation/progress/ws/${clientId}`)
+        : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}${apiBase.replace(/\/$/, "")}/presentation/progress/ws/${clientId}`;
+      const progressWs = new WebSocket(wsUrl);
       progressWs?.addEventListener("message", (event) => {
         try {
           const payload = JSON.parse(event.data);
