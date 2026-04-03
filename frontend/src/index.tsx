@@ -5,15 +5,44 @@ import App from "./app/App";
 import { Provider } from "react-redux";
 import { store } from "./app/store";
 import { ThemeProvider } from "@mui/material/styles";
-import theme from "./app/theme";
+import { getAppTheme } from "./app/theme";
+import { ColorModeContext } from "./app/ColorModeContext";
 
 const root = ReactDOM.createRoot(
   document.getElementById("root") as HTMLElement
 );
-root.render(
-  <ThemeProvider theme={theme}>
-    <Provider store={store}>
-      <App />
-    </Provider>
-  </ThemeProvider>
-);
+
+const Root = () => {
+  const [mode, setMode] = React.useState<"light" | "dark">(() => {
+    const cached = localStorage.getItem("app_theme_mode");
+    return cached === "dark" ? "dark" : "light";
+  });
+
+  const colorMode = React.useMemo(
+    () => ({
+      mode,
+      toggleMode: () => {
+        setMode((prev) => {
+          const next = prev === "light" ? "dark" : "light";
+          localStorage.setItem("app_theme_mode", next);
+          return next;
+        });
+      },
+    }),
+    [mode]
+  );
+
+  const theme = React.useMemo(() => getAppTheme(mode), [mode]);
+
+  return (
+    <ColorModeContext.Provider value={colorMode}>
+      <ThemeProvider theme={theme}>
+        <Provider store={store}>
+          <App />
+        </Provider>
+      </ThemeProvider>
+    </ColorModeContext.Provider>
+  );
+};
+
+root.render(<Root />);

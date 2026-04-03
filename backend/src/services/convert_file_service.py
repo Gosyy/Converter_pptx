@@ -5,6 +5,7 @@ from fastapi import UploadFile, HTTPException
 
 from src.utils import file_utils
 from src.modules.parsers.documents_parser import markdown_parser
+from src.services.rust_sidecar_client import parse_document
 
 
 async def convert_file(file: UploadFile) -> str:
@@ -15,6 +16,9 @@ async def convert_file(file: UploadFile) -> str:
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp_file:
         content = await file.read()
+        rust_markdown = parse_document(file.filename or "document", content)
+        if rust_markdown:
+            return rust_markdown
         tmp_file.write(content)
         tmp_file.flush()
         tmp_file_path = tmp_file.name

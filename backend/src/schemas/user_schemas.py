@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, JSON, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from src.database import Base
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from typing import Optional
 
 class User(Base):
@@ -39,8 +39,7 @@ class UserSchema(BaseModel):
     provider: Optional[str]
     is_verified: bool
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
     
 class UpdateUserSchema(BaseModel):

@@ -1,20 +1,19 @@
 import React from "react";
-import { Navigate } from "react-router-dom";
-import { useSelector } from "react-redux";
-import { RootState } from "../../../../../app/store";
-import { useAuthCheck } from "../../../../../shared/hooks";
-import { LoadingOverlay } from "../../../../../shared/components";
+import { Navigate, useLocation } from "react-router-dom";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const auth = useSelector((state: RootState) => state.auth);
+  const location = useLocation();
+  const isGuest = localStorage.getItem("guest_mode") === "enabled";
 
-  useAuthCheck();
-
-  if (!auth.isChecked) return <LoadingOverlay title="Подождите" />;
+  if (!isGuest) {
+    return <Navigate to="/" replace state={{ from: location.pathname }} />;
+  }
 
   return <>{children}</>;
 };
+
+export default ProtectedRoute;

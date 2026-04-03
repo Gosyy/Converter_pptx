@@ -1,0 +1,18 @@
+image:
+  backend: converter-backend:dev
+  frontend: converter-frontend:dev
+  rustSidecar: converter-rust-sidecar:dev
+
+features:
+  rustSidecar: false
+  kandinsky: false
+  progressWs: true
+  dbToggleAdmin: true
+
+env:
+  useDatabase: true
+  gigachatApiUrl: https://gigachat.devices.sberbank.ru/api/v1/chat/completions
+
+ingress:
+  enabled: true
+  host: converter-dev.local
