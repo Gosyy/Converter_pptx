@@ -1,6 +1,7 @@
-FROM python:3.11-slim
+FROM python:3.10-slim
 
 WORKDIR /code
+ARG PRELOAD_MODEL_CACHE=true
 
 # Default model cache locations (can be overridden via environment)
 ENV HF_HOME=/models_cache/huggingface \
@@ -18,6 +19,9 @@ RUN mkdir -p /models_cache/huggingface/transformers \
     /models_cache/sentence-transformers \
     /models_cache/torch && \
     chmod -R 777 /models_cache
+
+# Optional warm cache during image build so runtime doesn't need internet
+RUN if [ "$PRELOAD_MODEL_CACHE" = "true" ]; then python scripts/preload_model_cache.py; fi
 
 EXPOSE 8000
 

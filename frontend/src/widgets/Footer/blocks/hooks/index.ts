@@ -1,1 +1,2 @@
-export * from "./useGithubStars/useGithubStars";
+// GitHub stars hooks removed in cleanup.
+export {};
