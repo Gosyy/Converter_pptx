@@ -8,48 +8,49 @@ PATCH_DIR_DEFAULT="$PROJECT_DIR/refactor_patches"
 PATCH_ZIP_DEFAULT="$PROJECT_DIR/refactor_patches.zip"
 EXTRACTED_PATCH_DIR="$PROJECT_DIR/.tmp_refactor_patches"
 
+PATCH_SOURCE="${1:-}"
+PATCH_DIR=""
+
 PATCHES=(
-  "01_model_service.patch"
-  "02_convert_file_service.patch"
-  "03_rust_sidecar_client.patch"
-  "04_slide_content_generator.patch"
-  "05_auth_routes.patch"
-  "06_user_schemas.patch"
-  "07_presentation_routes.patch"
-  "08_database.patch"
-  "09_main.patch"
-  "10_tempfile_service.patch"
-  "11_model_api_utils.patch"
-  "12_config.patch"
-  "13_presentation_schemas.patch"
-  "14_docker-compose.patch"
-  "15_nginx_prod_conf.patch"
-  "16_nginx_conf_d_prod.patch"
+  "backend__src__services__model_service.py.patch"
+  "backend__src__services__convert_file_service.py.patch"
+  "backend__src__services__rust_sidecar_client.py.patch"
+  "backend__src__modules__models__slide_content_generator.py.patch"
+  "backend__src__routes__auth_routes.py.patch"
+  "backend__src__schemas__user_schemas.py.patch"
+  "backend__src__routes__presentation_routes.py.patch"
+  "backend__src__database.py.patch"
+  "backend__src__main.py.patch"
+  "backend__src__services__tempfile_service.py.patch"
+  "backend__src__utils__model_api_utils.py.patch"
+  "backend__src__config.py.patch"
+  "backend__src__schemas__presentation_schemas.py.patch"
+  "docker-compose.yml.patch"
+  "nginx__nginx.prod.conf.patch"
+  "nginx__conf.d__prod.conf.patch"
 )
 
 BACKEND_PATCHES=(
-  "01_model_service.patch"
-  "02_convert_file_service.patch"
-  "03_rust_sidecar_client.patch"
-  "04_slide_content_generator.patch"
-  "05_auth_routes.patch"
-  "06_user_schemas.patch"
-  "07_presentation_routes.patch"
-  "08_database.patch"
-  "09_main.patch"
-  "10_tempfile_service.patch"
-  "11_model_api_utils.patch"
-  "12_config.patch"
-  "13_presentation_schemas.patch"
+  "backend__src__services__model_service.py.patch"
+  "backend__src__services__convert_file_service.py.patch"
+  "backend__src__services__rust_sidecar_client.py.patch"
+  "backend__src__modules__models__slide_content_generator.py.patch"
+  "backend__src__routes__auth_routes.py.patch"
+  "backend__src__schemas__user_schemas.py.patch"
+  "backend__src__routes__presentation_routes.py.patch"
+  "backend__src__database.py.patch"
+  "backend__src__main.py.patch"
+  "backend__src__services__tempfile_service.py.patch"
+  "backend__src__utils__model_api_utils.py.patch"
+  "backend__src__config.py.patch"
+  "backend__src__schemas__presentation_schemas.py.patch"
 )
 
 DOCKER_PATCHES=(
-  "14_docker-compose.patch"
-  "15_nginx_prod_conf.patch"
-  "16_nginx_conf_d_prod.patch"
+  "docker-compose.yml.patch"
+  "nginx__nginx.prod.conf.patch"
+  "nginx__conf.d__prod.conf.patch"
 )
-
-PATCH_SOURCE="${1:-}"
 
 log() {
   printf "\n[%s] %s\n" "$(date '+%H:%M:%S')" "$*"
@@ -115,7 +116,12 @@ resolve_patch_dir() {
       rm -rf "$EXTRACTED_PATCH_DIR"
       mkdir -p "$EXTRACTED_PATCH_DIR"
       unzip -q "$PATCH_SOURCE" -d "$EXTRACTED_PATCH_DIR"
-      PATCH_DIR="$EXTRACTED_PATCH_DIR"
+
+      if [ -d "$EXTRACTED_PATCH_DIR/refactor_patches" ]; then
+        PATCH_DIR="$EXTRACTED_PATCH_DIR/refactor_patches"
+      else
+        PATCH_DIR="$EXTRACTED_PATCH_DIR"
+      fi
       return 0
     fi
 
@@ -131,7 +137,12 @@ resolve_patch_dir() {
     rm -rf "$EXTRACTED_PATCH_DIR"
     mkdir -p "$EXTRACTED_PATCH_DIR"
     unzip -q "$PATCH_ZIP_DEFAULT" -d "$EXTRACTED_PATCH_DIR"
-    PATCH_DIR="$EXTRACTED_PATCH_DIR"
+
+    if [ -d "$EXTRACTED_PATCH_DIR/refactor_patches" ]; then
+      PATCH_DIR="$EXTRACTED_PATCH_DIR/refactor_patches"
+    else
+      PATCH_DIR="$EXTRACTED_PATCH_DIR"
+    fi
     return 0
   fi
 
