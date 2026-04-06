@@ -1,0 +1,49 @@
+--- backend/src/schemas/user_schemas.py
++++ backend/src/schemas/user_schemas.py
+@@ -1,8 +1,11 @@
++from typing import Optional
++
++from pydantic import BaseModel, ConfigDict, EmailStr
+ from sqlalchemy import Column, Integer, String, JSON, ForeignKey, Boolean
+ from sqlalchemy.orm import relationship
++
+ from src.database import Base
+-from pydantic import BaseModel, ConfigDict, EmailStr
+-from typing import Optional
++
+ 
+ class User(Base):
+     __tablename__ = "users"
+@@ -18,18 +21,18 @@
+     presentations = relationship("Presentation", back_populates="user", cascade="all, delete")
+ 
+ 
+-# Если хочешь отдельную таблицу для презентаций:
+ class Presentation(Base):
+     __tablename__ = "presentations"
+ 
+     id = Column(String, primary_key=True, index=True)
+-    user_id = Column(Integer, ForeignKey("users.id"))
++    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
++    owner_token = Column(String, index=True, nullable=False)
+     title = Column(String, nullable=False)
+-    content = Column(JSON, default=[])  # сюда можно сохранять массив PlateSlide
++    content = Column(JSON, default=[])
+     theme = Column(JSON, nullable=True)
+-    
++
+     user = relationship("User", back_populates="presentations")
+-    
++
+ 
+ class UserSchema(BaseModel):
+     id: int
+@@ -41,7 +44,7 @@
+ 
+     model_config = ConfigDict(from_attributes=True)
+ 
+-    
++
+ class UpdateUserSchema(BaseModel):
+     name: Optional[str]
+     email: Optional[EmailStr]

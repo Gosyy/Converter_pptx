@@ -1,0 +1,31 @@
+--- docker-compose.yml
++++ docker-compose.yml
+@@ -7,7 +7,6 @@
+     volumes:
+       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+       - ./nginx/conf.d:/etc/nginx/conf.d/prod:ro
+-      - ./frontend/build:/usr/share/nginx/html:ro
+       - ./certbot/conf:/etc/letsencrypt:ro
+       - ./certbot/www:/var/www/certbot:ro
+     depends_on:
+@@ -22,11 +21,6 @@
+       dockerfile: Dockerfile
+     environment:
+       NODE_ENV: production
+-    volumes:
+-      - ./frontend:/app
+-      - /app/node_modules
+-    ports:
+-      - "${FRONTEND_PORT:-3000}:3000"
+     networks:
+       - app-network
+ 
+@@ -37,6 +31,8 @@
+       args:
+         PRELOAD_MODEL_CACHE: "true"
+     command: uvicorn src.main:app --host 0.0.0.0 --port ${BACKEND_INTERNAL_PORT:-8000}
++    env_file:
++      - ./backend/.env
+     environment:
+       ENVIRONMENT: production
+       POSTGRES_USER: ${POSTGRES_USER:-postgres}

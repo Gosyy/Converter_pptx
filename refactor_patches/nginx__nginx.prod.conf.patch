@@ -1,0 +1,18 @@
+--- nginx/nginx.prod.conf
++++ nginx/nginx.prod.conf
+@@ -12,9 +12,8 @@
+     include       /etc/nginx/mime.types;
+     default_type  application/octet-stream;
+ 
+-    # Определение upstream серверов для prod
+     upstream frontend {
+-        server frontend:3000;
++        server frontend:80;
+     }
+ 
+     upstream backend {
+@@ -31,4 +30,4 @@
+     keepalive_timeout  65;
+ 
+     include /etc/nginx/conf.d/prod/*.conf;
+-} +}

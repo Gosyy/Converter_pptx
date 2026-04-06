@@ -1,0 +1,231 @@
+--- backend/src/services/model_service.py
++++ backend/src/services/model_service.py
+@@ -10,25 +10,28 @@
+ """
+ 
+ from __future__ import annotations
+-import os
+-from typing import AsyncGenerator, Generator
++
+ import json
+ import logging
+-import asyncio
++import os
++from typing import Generator
+ 
+ from fastapi import HTTPException
+ 
+-from src.config import settings, model_settings, ModelAction
++from src.config import ModelAction, model_settings, settings
+ from src.modules.models import FZ44RAGSearcher, SlideContentGenerator
+ from src.modules.models.rag import DocumentProcessor, QdrantVectorDatabase
+ from src.schemas.model_schemas import ClassifierOut, StructureOut
+-from src.schemas.presentation_schemas import EditSlideInSchema
+ from src.utils import json_utils, model_api_utils, text_utils
+ 
+ 
+ def setup_logging(level: int = logging.INFO):
+     logging.basicConfig(level=level, format="%(asctime)s | %(levelname)s | %(message)s")
+     logging.info("Logging initialized")
++
++
++def get_runtime_api_key() -> str:
++    return model_api_utils.get_api_key()
+ 
+ 
+ class IntegratedPipeline:
+@@ -65,11 +68,11 @@
+         logging.info("START PIPELINE")
+         logging.info("=" * 60)
+         logging.info("[STEP 1] Classifier")
+-        clf, clf_raw = self.run_classifier(user_request)
++        clf, _ = self.run_classifier(user_request)
+         audience = clf.label
+         logging.info(f"Audience: {audience} (conf={clf.confidence:.2f})")
+         logging.info("[STEP 2] Planner")
+-        struct, planner_raw = self.run_planner(audience, project_context)
++        struct, _ = self.run_planner(audience, project_context)
+         slides = [s.model_dump() for s in struct.slides]
+         slide_structure = [
+             {
+@@ -88,13 +91,6 @@
+             "slide_structure": slide_structure,
+         }
+         return gen.generate_presentation_content(data)
+-        self.last_run_metadata = {
+-            "pipeline_metadata": {
+-                "classifier_output": clf.model_dump(),
+-                "structure_output": slides,
+-            },
+-            "generation_metadata": gen.generation_metadata,
+-        }
+ 
+     def replace_chart(self, slide: dict, params: dict, slides: list) -> dict:
+         title = slide.get("title", "")
+@@ -238,101 +234,90 @@
+         user_prompt: str,
+         slide: dict,
+         action: ModelAction,
+-        slides={},
+-        params={},
++        slides: list | None = None,
++        params: dict | None = None,
+     ) -> dict:
+-        """
+-        Regenerates a single slide based on the provided action and parameters.
+-        """
++        slides = slides or []
++        params = params or {}
++
+         if action == ModelAction.REPLACE_CHART:
+-            try:
+-                edited_slide = self.replace_chart(slide, params, slides)
+-                return edited_slide
+-            except Exception as e:
+-                return None, e
+-        else:
+-            try:
+-                payload = {
+-                    "slide_id": slide.get("slide_id"),
+-                    "title": slide.get("title", ""),
+-                    "content": slide.get("content", ""),
+-                    "action": action,
+-                    "params": params,
+-                }
+-                if action == "custom":
+-                    payload["custom_prompt"] = user_prompt
+-
+-                messages = [
++            return self.replace_chart(slide, params, slides)
++
++        payload = {
++            "slide_id": slide.get("slide_id"),
++            "title": slide.get("title", ""),
++            "content": slide.get("content", ""),
++            "action": action.value if hasattr(action, "value") else str(action),
++            "params": params,
++        }
++        if action == ModelAction.CUSTOM:
++            payload["custom_prompt"] = user_prompt
++
++        messages = [
++            {
++                "role": "user",
++                "content": model_settings.SINGLE_SLIDE_EDIT_PROMPT
++                + "\nUserInput: "
++                + json.dumps(payload, ensure_ascii=False),
++            }
++        ]
++
++        resp = model_api_utils.call_model(
++            messages,
++            self.api_key,
++            model=self.llm_model,
++            max_tokens=600,
++            temperature=0.2,
++        )
++        raw = text_utils.pre_sanitize(model_api_utils.get_content(resp))
++        parsed = json_utils.extract_json_balanced(raw)
++
++        if not isinstance(parsed, dict):
++            resp2 = model_api_utils.call_model(
++                [
+                     {
+                         "role": "user",
+-                        "content": model_settings.SINGLE_SLIDE_EDIT_PROMPT
+-                        + "\nUserInput: "
+-                        + json.dumps(payload, ensure_ascii=False),
++                        "content": model_settings.JSON_ONLY_PROMPT + "\n\n" + messages[0]["content"],
+                     }
+-                ]
+-                resp = model_api_utils.call_model(
+-                    messages,
+-                    self.api_key,
+-                    model=self.llm_model,
+-                    max_tokens=600,
+-                    temperature=0.2,
+-                )
+-                raw = text_utils.pre_sanitize(resp["choices"][0]["message"]["content"])
+-                parsed = json_utils.extract_json_balanced(raw)
+-
+-                if not isinstance(parsed, dict):
+-                    resp2 = model_api_utils.call_model(
+-                        [
+-                            {
+-                                "role": "user",
+-                                "content": "Previous reply was not valid JSON. Please REPLY with valid JSON only.\n\n"
+-                                + messages[0]["content"],
+-                            }
+-                        ],
+-                        self.api_key,
+-                        model=self.llm_model,
+-                        max_tokens=600,
+-                        temperature=0.2,
+-                    )
+-                    raw2 = text_utils.pre_sanitize(
+-                        resp2["choices"][0]["message"]["content"]
+-                    )
+-                    parsed = json_utils.extract_json_balanced(raw2)
+-
+-                if parsed is None:
+-                    raise ValueError()
+-
+-                return parsed
+-            except Exception as e:
+-                print(repr(e))
+-                return HTTPException(500, "Ошибка сервера")
++                ],
++                self.api_key,
++                model=self.llm_model,
++                max_tokens=600,
++                temperature=0.2,
++            )
++            raw2 = text_utils.pre_sanitize(model_api_utils.get_content(resp2))
++            parsed = json_utils.extract_json_balanced(raw2)
++
++        if not isinstance(parsed, dict):
++            raise HTTPException(status_code=502, detail="Invalid JSON from edit model")
++
++        return parsed
+ 
+ 
+ setup_logging(logging.INFO)
+-api_key = model_api_utils.get_api_key()
+ 
+ 
+ async def generate_presentation(user_prompt: str, project_context: str, model: str):
+     pipe = IntegratedPipeline(
+-        api_key=api_key,
++        api_key=get_runtime_api_key(),
+         embedding_model=settings.DEFAULT_EMBEDDING_MODEL,
+-        llm_model=model,
++        llm_model=model or settings.DEFAULT_MODEL,
+     )
+     pipe.load_documents([project_context])
+ 
+     for slide in pipe.run(user_prompt, project_context=project_context):
+         title = slide.get("title", "Untitled")
+         content = slide.get("content", "")
+-        chunk = f"# {title}\n\n{content.strip()}\n\n"
+-        yield chunk
+-
+-
+-def edit_one_slide(user_prompt, slide: dict, action: str, model: str) -> str:
++        yield f"# {title}\n\n{content.strip()}\n\n"
++
++
++def edit_one_slide(user_prompt, slide: dict, action: ModelAction, model: str) -> str:
+     pipe = IntegratedPipeline(
+-        api_key=api_key,
++        api_key=get_runtime_api_key(),
+         embedding_model=settings.DEFAULT_EMBEDDING_MODEL,
+-        llm_model=settings.DEFAULT_MODEL,
++        llm_model=model or settings.DEFAULT_MODEL,
+     )
+-    content = pipe.regenerate_slide(user_prompt, slide, action).get("content", "")
+-
+-    return f"# {content}\n"
++    edited = pipe.regenerate_slide(user_prompt, slide, action)
++    title = edited.get("title", slide.get("title", ""))
++    content = edited.get("content", "")
++    return f"# {title}\n\n{content}\n"

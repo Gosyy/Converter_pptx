@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Converter_pptx" Language="1033" Version="1.0.0" Manufacturer="Converter" UpgradeCode="12345678-1234-1234-1234-1234567890ab">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MediaTemplate EmbedCab="yes" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="Converter_pptx" />
+      </Directory>
+    </Directory>
+    <Feature Id="MainFeature" Title="Converter_pptx" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+  </Product>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="ReadmeComponent" Guid="*">
+        <File Id="ReadmeFile" Source="README.md" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="ProductComponents">
+      <ComponentRef Id="ReadmeComponent" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

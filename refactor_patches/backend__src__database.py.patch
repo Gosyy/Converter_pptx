@@ -1,0 +1,20 @@
+--- backend/src/database.py
++++ backend/src/database.py
+@@ -1,6 +1,7 @@
++from fastapi import HTTPException
+ from sqlalchemy import create_engine
+ from sqlalchemy.orm import sessionmaker, declarative_base
+-from fastapi import HTTPException
++
+ from src.config import settings
+ 
+ DATABASE_ENABLED = bool(settings.USE_DATABASE)
+@@ -25,7 +26,7 @@
+         f"{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/"
+         f"{settings.POSTGRES_DB}"
+     )
+-    engine = create_engine(DATABASE_URL, echo=True)  # echo=True для логов SQL
++    engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+ 
+ Base = declarative_base()

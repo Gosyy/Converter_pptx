@@ -1,0 +1,228 @@
+import React from "react";
+import { Box } from "@mui/material";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  rectSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import SortableBlock from "../SortableBlock";
+import ImageColumnLayout from "./components/ImageColumnLayout";
+import ImageRowLayout from "./components/ImageRowLayout";
+import Grid2x2Layout from "./components/Grid2x2Layout";
+import GridTextTopTwoBottomLayout from "./components/GridTextTopTwoBottomLayout";
+import { PlateSlide, SlideBlock } from "../../../../shared/types";
+import { useDispatch } from "react-redux";
+import { AppDispatch } from "../../../../app/store";
+import { updateSlideContent } from "../../../../app/store/slices/editorSlice";
+
+interface Props {
+  isMini?: boolean;
+  slide: PlateSlide;
+  setSlideContent: (blocks: SlideBlock[]) => void;
+  renderBlock: (block: SlideBlock) => React.ReactNode;
+}
+
+// Каждая ячейка грида
+interface Cell {
+  id: string;
+  blocks: SlideBlock[];
+}
+
+export const SlideContent: React.FC<Props> = ({
+  isMini,
+  slide,
+  renderBlock,
+}) => {
+  const dispatch = useDispatch<AppDispatch>();
+  const sensors = useSensors(useSensor(PointerSensor));
+
+  const imageBlocks = slide.content.filter((b) => b.type === "image");
+
+  // Создаём ячейки для грида
+  const getGridCells = (): Cell[] => {
+    const cells: Cell[] = [
+      { id: "cell-1", blocks: [] },
+      { id: "cell-2", blocks: [] },
+      { id: "cell-3", blocks: [] },
+      { id: "cell-4", blocks: [] },
+    ];
+
+    slide.content.forEach((b, idx) => {
+      const cellIndex = b.cellId
+        ? cells.findIndex((c) => c.id === b.cellId)
+        : idx % 4; // распределяем по 4 ячейкам
+      cells[cellIndex].blocks.push({ ...b, cellId: cells[cellIndex].id });
+    });
+
+    return cells;
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+
+    const cells = getGridCells();
+
+    const fromCell = cells.find((c) =>
+      c.blocks.some((b) => b.id === active.id)
+    );
+    if (!fromCell) return;
+
+    // Найдём индекс блока внутри ячейки
+    const fromIndex = fromCell.blocks.findIndex((b) => b.id === active.id);
+    if (fromIndex === -1) return;
+
+    // Если перетаскиваем внутри той же ячейки
+    if (fromCell.blocks.some((b) => b.id === over.id)) {
+      const toIndex = fromCell.blocks.findIndex((b) => b.id === over.id);
+      const newBlocks = arrayMove(fromCell.blocks, fromIndex, toIndex);
+
+      const newCells = cells.map((cell) =>
+        cell.id === fromCell.id ? { ...cell, blocks: newBlocks } : cell
+      );
+
+      const newContent = newCells.flatMap((cell) =>
+        cell.blocks.map((b) => ({ ...b, cellId: cell.id }))
+      );
+
+      dispatch(updateSlideContent({ slideId: slide.id, newContent }));
+      return;
+    }
+
+    const toCell =
+      cells.find((c) => c.id === over.id) ||
+      cells.find((c) => c.blocks.some((b) => b.id === over.id));
+    if (!toCell) return;
+
+    const draggedBlock = fromCell.blocks[fromIndex];
+
+    const newCells = cells.map((cell) => {
+      if (cell.id === fromCell.id) {
+        return {
+          ...cell,
+          blocks: cell.blocks.filter((b) => b.id !== active.id),
+        };
+      }
+      if (cell.id === toCell.id) {
+        const overIndex = cell.blocks.findIndex((b) => b.id === over.id);
+        const insertIndex = overIndex >= 0 ? overIndex : cell.blocks.length;
+        const newBlocks = [...cell.blocks];
+        newBlocks.splice(insertIndex, 0, draggedBlock);
+        return { ...cell, blocks: newBlocks };
+      }
+      return cell;
+    });
+
+    const newContent = newCells.flatMap((cell) =>
+      cell.blocks.map((b) => ({ ...b, cellId: cell.id }))
+    );
+
+    dispatch(updateSlideContent({ slideId: slide.id, newContent }));
+  };
+
+  const renderCellBlocks = (blocks: SlideBlock[], cellId: string) => (
+    <SortableContext
+      items={blocks.map((b) => b.id)}
+      strategy={rectSortingStrategy}
+    >
+      {blocks.map((block, idx) => (
+        <SortableBlock
+          key={block.id}
+          idx={idx}
+          slideId={slide.id}
+          block={block}
+          renderBlock={(b) => renderBlock(b)}
+        />
+      ))}
+    </SortableContext>
+  );
+
+  const firstImage = imageBlocks[0];
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleDragEnd}
+    >
+      {(() => {
+        switch (slide.layout) {
+          case "left-image":
+          case "right-image":
+            if (!firstImage) return renderCellBlocks(slide.content, slide.id);
+            return (
+              <ImageColumnLayout
+                slide={slide}
+                slideId={slide.id}
+                blockId={firstImage.id}
+                layout={slide.layout}
+              >
+                {renderCellBlocks(slide.content, slide.id)}
+              </ImageColumnLayout>
+            );
+
+          case "top-image":
+          case "bottom-image":
+            if (!firstImage) return renderCellBlocks(slide.content, slide.id);
+            return (
+              <ImageRowLayout
+                slide={slide}
+                slideId={slide.id}
+                blockId={firstImage.id}
+                layout={slide.layout}
+              >
+                {renderCellBlocks(slide.content, slide.id)}
+              </ImageRowLayout>
+            );
+
+          case "grid-2x2": {
+            const cells = getGridCells();
+            return (
+              <Grid2x2Layout slide={slide}>
+                {cells.map((cell) => (
+                  <Box
+                    key={cell.id}
+                    sx={{
+                      minHeight: 150,
+                      border: "1px dashed #ccc",
+                      p: 1,
+                      borderRadius: 1,
+                    }}
+                  >
+                    {renderCellBlocks(cell.blocks, cell.id)}
+                  </Box>
+                ))}
+              </Grid2x2Layout>
+            );
+          }
+
+          case "grid-text-top-two-bottom": {
+            const cells = getGridCells();
+            return (
+              <GridTextTopTwoBottomLayout slide={slide}>
+                {cells.map((cell) => (
+                  <Box key={cell.id}>
+                    {renderCellBlocks(cell.blocks, cell.id)}
+                  </Box>
+                ))}
+              </GridTextTopTwoBottomLayout>
+            );
+          }
+
+          case "center":
+          case "text-only":
+          default:
+            return <Box>{renderCellBlocks(slide.content, slide.id)}</Box>;
+        }
+      })()}
+    </DndContext>
+  );
+};
