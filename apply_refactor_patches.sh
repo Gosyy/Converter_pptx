@@ -10,6 +10,7 @@ EXTRACTED_PATCH_DIR="$PROJECT_DIR/.tmp_refactor_patches"
 
 PATCH_SOURCE="${1:-}"
 PATCH_DIR=""
+TMP_PATCH="$PROJECT_DIR/.tmp_current_patch.patch"
 
 PATCHES=(
   "backend__src__services__model_service.py.patch"
@@ -76,9 +77,8 @@ require_cmd() {
 }
 
 cleanup() {
-  if [ -d "$EXTRACTED_PATCH_DIR" ]; then
-    rm -rf "$EXTRACTED_PATCH_DIR"
-  fi
+  [ -d "$EXTRACTED_PATCH_DIR" ] && rm -rf "$EXTRACTED_PATCH_DIR"
+  [ -f "$TMP_PATCH" ] && rm -f "$TMP_PATCH"
 }
 
 on_error() {
@@ -94,6 +94,7 @@ trap cleanup EXIT
 require_cmd git
 require_cmd python3
 require_cmd unzip
+require_cmd sed
 
 [ -d "$PROJECT_DIR" ] || die "Не найден каталог проекта: $PROJECT_DIR"
 [ -d "$BACKEND_DIR" ] || die "Не найден backend: $BACKEND_DIR"
@@ -157,23 +158,45 @@ for patch in "${PATCHES[@]}"; do
   [ -f "$PATCH_DIR/$patch" ] || die "Не найден патч: $PATCH_DIR/$patch"
 done
 
+prepare_backend_patch() {
+  local patch_path="$1"
+  sed \
+    -e 's#^--- backend/#--- #' \
+    -e 's#^+++ backend/#+++ #' \
+    "$patch_path" > "$TMP_PATCH"
+}
+
+apply_backend_patch() {
+  local patch_path="$1"
+  prepare_backend_patch "$patch_path"
+
+  (
+    cd "$BACKEND_DIR"
+    git apply --check "$TMP_PATCH"
+    git apply "$TMP_PATCH"
+    python3 -m compileall -q src
+  )
+}
+
+apply_root_patch() {
+  local patch_path="$1"
+  git apply --check "$patch_path"
+  git apply "$patch_path"
+}
+
 apply_one_patch() {
   local patch="$1"
   local patch_path="$PATCH_DIR/$patch"
   local commit_msg="Apply ${patch%.patch}"
 
   log "Проверка патча: $patch"
-  git apply --check "$patch_path"
-
-  log "Применение патча: $patch"
-  git apply "$patch_path"
 
   if contains "$patch" "${BACKEND_PATCHES[@]}"; then
-    log "Проверка Python backend после $patch"
-    (
-      cd "$BACKEND_DIR"
-      python3 -m compileall -q src
-    )
+    log "Применение backend-патча из каталога backend: $patch"
+    apply_backend_patch "$patch_path"
+  else
+    log "Применение root/deploy-патча из корня проекта: $patch"
+    apply_root_patch "$patch_path"
   fi
 
   if contains "$patch" "${DOCKER_PATCHES[@]}"; then
