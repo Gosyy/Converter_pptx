@@ -1,7 +1,11 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import logging
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from src.config import settings
+from src.database import engine, Base
+from src.preload import preload_models
 from src.routes import (
     file_routes,
     presentation_routes,
@@ -9,8 +13,7 @@ from src.routes import (
     auth_routes,
     kandinsky_routes,
 )
-from src.preload import preload_models
-from src.config import settings
+from src.schemas.user_schemas import User, Presentation
 
 app = FastAPI(
     title="API Documentation",
@@ -20,7 +23,6 @@ app = FastAPI(
     docs_url="/docs",
 )
 
-# Настройка CORS (без wildcard в production)
 origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 
 app.add_middleware(
@@ -40,9 +42,11 @@ app.add_middleware(
 )
 
 
-# Preload models at startup
 @app.on_event("startup")
 async def startup_event():
+    if engine is not None:
+        Base.metadata.create_all(bind=engine)
+
     if not settings.PRELOAD_MODELS:
         logging.info("Startup: model preload disabled (PRELOAD_MODELS=false)")
         return

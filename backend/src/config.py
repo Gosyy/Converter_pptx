@@ -223,6 +223,13 @@ class _ModelSettings(BaseSettings):
 
 class ModelAction(str, Enum):
     REPLACE_CHART = "replace_chart"
+    POLISH = "polish"
+    CORRECT = "correct"
+    TRANSLATE = "translate"
+    EXPAND = "expand"
+    SHORTEN = "shorten"
+    SIMPLIFY = "simplify"
+    SPECIFY = "specify"
     CUSTOM = "custom"
 
 

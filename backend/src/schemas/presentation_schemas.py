@@ -11,12 +11,9 @@ class _BaseModelReqSchema(BaseModel):
     model: str = ""
 
     @model_validator(mode="after")
-    def check_action(self) -> EditSlideInSchema:
-        print("Начинается валидация")
+    def normalize_model(self):
         if self.model not in settings.DEFAULT_MODEL_VALUES:
-            print(f"Модель {self.model} недопустима, используется стандартная модель")
             self.model = settings.DEFAULT_MODEL
-
         return self
 
 
@@ -30,7 +27,7 @@ class EditSlideInSchema(_BaseModelReqSchema):
     slide: SlideItem
 
     @model_validator(mode="after")
-    def check_action(self) -> EditSlideInSchema:
+    def validate_custom_prompt(self):
         if (self.action == ModelAction.CUSTOM) and not self.text.strip():
             raise ValueError("При кастомном запросе промпт не может быть пустым!")
 

@@ -65,7 +65,7 @@ class SlideContentGenerator:
                 return model_api_utils.get_content(resp)
             except Exception:
                 if attempt < retry - 1:
-                    time.sleep(1 + attempt * 2)
+                    time.sleep(0.5 * (attempt + 1))
                     continue
                 raise
 
@@ -114,9 +114,14 @@ class SlideContentGenerator:
             or f"### {slide_title}\n\n* Данные для этого раздела отсутствуют"
         )
 
-        chart_blocks = self.generate_charts_with_llm(
-            slide_id, slide_title, slide_task, topic, retrieved, max_tokens=600
-        )
+        chart_blocks = []
+        try:
+            chart_blocks = self.generate_charts_with_llm(
+                slide_id, slide_title, slide_task, topic, retrieved, max_tokens=600
+            )
+        except Exception as e:
+            logging.warning(f"[Slide {slide_id}] chart generation failed: {e}")
+            chart_blocks = []
 
         if chart_blocks:
             if self._should_chart_only(slide_title, slide_task):
